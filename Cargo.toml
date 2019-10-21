@@ -1,0 +1,12 @@
+[package]
+name = "impediment"
+version = "0.0.0"
+edition = "2018"
+
+
+[dependencies]
+num = "0.2.0"
+nlopt = "0.5.1"
+
+gtk = "0.7.0"
+gio = "0.7.0"
