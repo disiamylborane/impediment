@@ -35,8 +35,29 @@ impl ParameterDesc{
     }
 }
 
-fn draw(g: &cairo::Context){
+fn draw(context: &cairo::Context){
+    unsafe {
+        match &g_model {
+            Some(model) => {
+                context.set_source_rgb(0.0, 0.7, 0.4);
+                
+                if true {
+                    model.circ.paint(&context, 20., (50., 50.));
+                } else {
 
+                    Parallel{elems: ComplexCirc::new(vec![
+                        Box::new(Resistor{}),
+                        Box::new(Capacitor{}),
+                        Box::new(CPE{}),
+                        Box::new(Resistor{}),
+                    ])}.paint(&context, 18., (50., 50.));
+                }
+
+                context.stroke();
+            }
+            _ => {panic!();}
+        }
+    }
 }
 
 fn main() {
@@ -54,7 +75,9 @@ fn main() {
 
     let mut params = ParameterDesc::new(circ.paramlist());
 
-    unsafe {g_model = Some(Model{circ, params});}
+    unsafe {
+        
+    g_model = Some(Model{circ, params});
 
     let app = gtk::Application::new(Some("app.impediment"), Default::default()).expect("GTK failed");
 
@@ -66,55 +89,46 @@ fn main() {
 
         let graph: gtk::DrawingArea = builder.get_object("graphCircuit").unwrap();
         graph.connect_draw(|_widget, context| {
-
             context.set_source_rgb(1.0, 1.0, 1.0);
             context.paint();
 
-            context.set_source_rgb(0.0, 0.0, 0.0);
-
-            context.move_to(50.0, 50.0);
-            context.line_to(55.0, 50.0);
-
-            context.move_to(55.0, 45.0);
-            context.line_to(55.0, 55.0);
-            context.line_to(75.0, 55.0);
-            context.line_to(75.0, 45.0);
-            context.line_to(55.0, 45.0);
-
-            context.move_to(75.0, 50.0);
-            context.line_to(90.0, 50.0);
-
-            context.move_to(90.0, 45.0);
-            context.line_to(90.0, 55.0);
-            context.move_to(95.0, 45.0);
-            context.line_to(95.0, 55.0);
-            context.move_to(95.0, 50.0);
-            context.line_to(110.0, 50.0);
-
-            unsafe {
-                match &g_model {
-                    Some(model) => {
-                        let imp = model.circ.impedance(100.0, &model.params.vals);
-                        context.set_source_rgb(0.0, 0.0, 0.0);
-                        context.set_font_size(14.0);
-
-                        context.move_to(95.0, 60.0);
-                        context.show_text(& (imp.re as f32).to_string());
-
-                        context.move_to(95.0, 80.0);
-                        context.show_text(& (imp.im as f32).to_string());
-                    }
-                    _ => {panic!();}
-                }
-            }
-
+            draw(&context);
 
             context.stroke();
             Inhibit(false)
         });
-        
+
+        let parambox: gtk::Box = builder.get_object("boxParams").unwrap();
+        /*match &g_model {
+            Some(model) => {
+
+            }
+
+            _ => panic!()
+        }*/
+        let _model = g_model.as_ref().unwrap();
+        let params = ParameterDesc::new((_model.circ).paramlist());
+
+        for i in 0..params.vals.len() {
+            let single_param = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+            
+            let lbl = gtk::Label::new(Some(&i.to_string()));
+            let ebounds = gtk::Entry::new();
+            let evalue = gtk::Entry::new();
+            ebounds.set_text(&format!("{}, {}", params.bounds[i].0, params.bounds[i].1));
+            evalue.set_text(&params.vals[i].to_string());
+
+            single_param.pack_start(&lbl, /*expand*/false, /*fill*/false, /*padding*/0);
+            single_param.pack_start(&ebounds, /*expand*/true, /*fill*/true, /*padding*/0);
+            single_param.pack_start(&evalue, /*expand*/true, /*fill*/true, /*padding*/0);
+
+            parambox.pack_start(&single_param, /*expand*/false, /*fill*/false, /*padding*/0);
+        }
+
         main_window.show_all();
     });
 
     app.run(&[String::new()]);
+    }
+
 }

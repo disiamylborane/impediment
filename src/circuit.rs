@@ -36,7 +36,7 @@ pub trait Circuit {
     fn paramlist(&self) -> &[ParameterBase];
 
     /// A size of painted circuit in <blocks>
-    fn painted_size(&self) -> (u16, u16) {(2,1)}
+    fn painted_size(&self) -> (u16, u16) {(2,2)}
 
     /// A size of painted circuit in <blocks>
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64));
@@ -78,6 +78,10 @@ impl Circuit for Resistor {
 
         ctx.move_to(pos.0 + blocksize*7./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
+
+        ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
+        ctx.set_font_size(blocksize*3./4.);
+        ctx.show_text(&"R");
     }
 }
 impl Circuit for Capacitor {
@@ -220,17 +224,21 @@ impl Circuit for Series {
     fn painted_size(&self) -> (u16, u16) {
         let s = self.elems.c.iter().map(|x| x.painted_size()).fold((0,0), |a, b| (a.0+b.0, std::cmp::max(a.1,b.1)));
 
-        (s.0 + ((self.elems.c.len()-1) as u16), s.1)
+        (s.0 /*+ ((self.elems.c.len()-1) as u16)*/, s.1)
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
         let (mut x, y) = pos;
-        for c in &self.elems.c {
+
+        self.elems.c[0].paint( ctx, blocksize, (x, y) );
+        x += self.elems.c[0].painted_size().0 as f64 * blocksize;
+        
+        for c in &self.elems.c[1..] {
+            //ctx.move_to(x, pos.1 + blocksize/2.);
+            //ctx.line_to(x + blocksize, pos.1 + blocksize/2.);
+            //x += blocksize;
             c.paint( ctx, blocksize, (x, y) );
-            let sz = c.painted_size().0 as f64 * blocksize;
-            ctx.move_to(pos.0 + sz, pos.1 + blocksize/2.);
-            ctx.line_to(pos.0 + sz + blocksize, pos.1 + blocksize/2.);
-            x = pos.0 + sz + blocksize;
+            x += c.painted_size().0 as f64 * blocksize;
         }
     }
     
@@ -257,6 +265,37 @@ impl Circuit for Parallel {
 
         (s.0 + 2, s.1)
     }
+
+    fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
+        let (_, mut y) = pos;
+        let xsize = self.painted_size().0;
+
+        ctx.move_to(pos.0, pos.1 + blocksize/2.);
+        ctx.line_to(pos.0 + blocksize, pos.1 + blocksize/2.);
+        ctx.move_to(pos.0 + (xsize-1) as f64 * blocksize, pos.1 + blocksize/2.);
+        ctx.line_to(pos.0 + (xsize-1) as f64 * blocksize + blocksize, pos.1 + blocksize/2.);
+
+        for c in &self.elems.c {
+            let psize = c.painted_size().0;
+            let drawend = pos.0 + (xsize as f64)*blocksize;
+            let elemstart = ((xsize-psize) as f64)/2.0*blocksize + pos.0;
+            let elemend = elemstart + (psize as f64)*blocksize;
+            c.paint( ctx, blocksize, (elemstart, y) );
+
+            ctx.move_to(pos.0 + blocksize/2., y+blocksize/2.);
+            ctx.line_to(elemstart, y+blocksize/2.);
+            ctx.move_to(elemend, y+blocksize/2.);
+            ctx.line_to(pos.0 + (xsize as f64)*blocksize - blocksize/2., y+blocksize/2.);
+
+            ctx.move_to(pos.0 + blocksize/2., pos.1+blocksize/2.);
+            ctx.line_to(pos.0 + blocksize/2., y+blocksize/2.);
+
+            ctx.move_to(drawend - blocksize/2., pos.1+blocksize/2.);
+            ctx.line_to(drawend - blocksize/2., y+blocksize/2.);
+            y += c.painted_size().1 as f64 * blocksize;
+        }
+    }
+
 }
 
 
