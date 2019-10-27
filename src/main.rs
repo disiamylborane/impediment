@@ -182,8 +182,6 @@ fn block_by_coords(model: &Model, wid: &gtk::DrawingArea, event: &gdk::EventButt
     Some((x as u16, y as u16))
 }
 
-
-
 fn main() {
     let circ : Box<dyn Circuit> =  
         Box::new(Series{elems: ComplexCirc::new(vec![
@@ -211,6 +209,53 @@ fn main() {
             let main_window: gtk::Window = builder.get_object("main_window").unwrap();
             main_window.set_application(Some(app));
 
+            let rb_element_r: gtk::RadioButton = builder.get_object("rb_element_r").unwrap();
+            let rb_element_c: gtk::RadioButton = builder.get_object("rb_element_c").unwrap();
+            let rb_element_w: gtk::RadioButton = builder.get_object("rb_element_w").unwrap();
+            let rb_element_l: gtk::RadioButton = builder.get_object("rb_element_l").unwrap();
+            let rb_element_q: gtk::RadioButton = builder.get_object("rb_element_q").unwrap();
+            let create_user_element = move || -> Box<dyn Circuit> {
+                if rb_element_r.get_active() {
+                    Box::new(Resistor{})
+                }
+                else if rb_element_c.get_active() {
+                    Box::new(Capacitor{})
+                }
+                else if rb_element_w.get_active() {
+                    Box::new(Warburg{})
+                }
+                else if rb_element_l.get_active() {
+                    Box::new(Inductor{})
+                }
+                else if rb_element_q.get_active() {
+                    Box::new(CPE{})
+                }
+                else {
+                    panic!();
+                }
+            };
+
+
+            let rb_edit_replace: gtk::RadioButton = builder.get_object("rb_edit_replace").unwrap();
+            let rb_edit_series: gtk::RadioButton = builder.get_object("rb_edit_series").unwrap();
+            let rb_edit_parallel: gtk::RadioButton = builder.get_object("rb_edit_parallel").unwrap();
+            let perform_user_edit = move |model: &mut Model, x, y, newelem| {
+                if rb_edit_replace.get_active() {
+                    model.circ.replace((x, y), newelem);
+                }
+                else if rb_edit_series.get_active() {
+                    model.circ.add_series((x, y), newelem);
+                }
+                else if rb_edit_parallel.get_active() {
+                    // TODO: implement
+                    //model.circ.add_parallel((x, y), newelem);
+                }
+                else {
+                    panic!();
+                }
+            };
+
+
             let graph: gtk::DrawingArea = builder.get_object("graphCircuit").unwrap();
             graph.connect_draw(|widget, context| {
                 draw(&widget, &context);
@@ -228,11 +273,12 @@ fn main() {
                 let model = g_model.as_mut().unwrap();
 
                 if let Some((x,y)) = block_by_coords(&model, &wid, &event) {
-                    let newelem: Box<dyn Circuit> = Box::new(Resistor{});
+                    let newelem: Box<dyn Circuit> = create_user_element();
 
                     println!("....at cell {:?}", (x, y));
 
-                    model.circ.replace((x, y), newelem);
+                    //model.circ.replace((x, y), newelem);
+                    perform_user_edit(model, x,y, newelem);
                     println!("....{:?}", model.circ);
                     println!("....{:?}", g_model.as_ref().unwrap().circ);
 

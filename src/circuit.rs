@@ -347,8 +347,10 @@ impl Circuit for Series {
     }
 
     fn add_series(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>>{
-        if let Some((i, _start_x)) = self._index_by_block(coord) {
-            self.elems.c.insert(i, element);
+        if let Some((i, start_x)) = self._index_by_block(coord) {
+            if let Some(elem) = self.elems.c[i].add_series((coord.0-start_x, coord.1), element) {
+                self.elems.c.insert(i, elem);
+            }
         }
         None
     }
@@ -468,6 +470,30 @@ impl Circuit for Parallel {
                     };
                     None
                 }
+            }
+        }
+    }
+
+    fn add_series(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>>{
+        let ib = self._index_by_block(coord);
+        
+        match ib {
+            ParallelBlockPicked::Child(i, elemblock, start_y) => {
+                if let Some(elem) = self.elems.c[i].add_series((coord.0-elemblock, coord.1-start_y), element) {
+                    let prev = self.elems.c.remove(i);
+                    self.elems.c.insert(i, Box::new(Series{
+                        elems: ComplexCirc {
+                            c: vec![prev, elem]
+                        }
+                    }));
+                }
+                None
+            }
+            ParallelBlockPicked::This => {
+                Some(element)
+            }
+            ParallelBlockPicked::None => {
+                None
             }
         }
     }
