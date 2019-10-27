@@ -51,7 +51,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkButton">
+              <object class="GtkButton" id="b_open_model">
                 <property name="label" translatable="yes">Open model</property>
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>

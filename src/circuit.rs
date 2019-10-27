@@ -27,13 +27,13 @@ pub const CPE_N:      ParameterBase = ParameterBase {letter: 'n', limits: (0.0, 
 /// An unaided circuit having its own
 /// parameter set and frequency response
 
-pub trait Circuit {
+pub trait Circuit : std::fmt::Debug {
     /// A circuit-specific routine to calculate the impedance
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx;
 
     /// Get a list of all circuit parameters. The parameter values are to provide
     /// when calculating the impedance.
-    fn paramlist(&self) -> &[ParameterBase];
+    fn paramlist(&self) -> Vec<ParameterBase>;
 
     /// A size of painted circuit in <blocks>
     fn painted_size(&self) -> (u16, u16) {(2,2)}
@@ -48,6 +48,10 @@ pub trait Circuit {
         assert!(params.len() == self.paramlist().len());
         return self._impedance(omega, params);
     }
+
+    fn replace(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>> {
+        Some(element)
+    }
 }
 
 
@@ -59,8 +63,34 @@ pub struct Inductor {}
 pub struct Warburg {}
 pub struct CPE {}
 
+impl std::fmt::Debug for Resistor {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "R")
+    }
+}
+impl std::fmt::Debug for Capacitor {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "C")
+    }
+}
+impl std::fmt::Debug for Inductor {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "L")
+    }
+}
+impl std::fmt::Debug for Warburg {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "W")
+    }
+}
+impl std::fmt::Debug for CPE {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Q")
+    }
+}
+
 impl Circuit for Resistor {
-    fn paramlist(&self) -> &[ParameterBase] {return &[RESISTANCE];}
+    fn paramlist(&self) -> Vec<ParameterBase> {vec![RESISTANCE]}
     fn _impedance(&self, _omega: f64, params: &[f64]) -> Cplx {
         let r = params[0];
         Cplx::new(r, 0.0)
@@ -85,7 +115,7 @@ impl Circuit for Resistor {
     }
 }
 impl Circuit for Capacitor {
-    fn paramlist(&self) -> &[ParameterBase] {return &[CAPACITY];}
+    fn paramlist(&self) -> Vec<ParameterBase> {vec![CAPACITY]}
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let c = params[0];
         1.0 / (Cplx::new(0.0, 1.0) * omega * c)
@@ -105,7 +135,7 @@ impl Circuit for Capacitor {
     }
 }
 impl Circuit for Inductor {
-    fn paramlist(&self) -> &[ParameterBase] {return &[INDUCTANCE];}
+    fn paramlist(&self) -> Vec<ParameterBase> {vec![INDUCTANCE]}
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let l = params[0];
         Cplx::new(0.0, 1.0) * omega * l
@@ -116,7 +146,7 @@ impl Circuit for Inductor {
     }
 }
 impl Circuit for Warburg {
-    fn paramlist(&self) -> &[ParameterBase] {return &[WARBURG_A];}
+    fn paramlist(&self) -> Vec<ParameterBase> {vec![WARBURG_A]}
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let aw = params[0];
         let sqrtom = omega.sqrt();
@@ -138,7 +168,7 @@ impl Circuit for Warburg {
     }
 }
 impl Circuit for CPE {
-    fn paramlist(&self) -> &[ParameterBase] {return &[CPE_Q, CPE_N];}
+    fn paramlist(&self) -> Vec<ParameterBase> {vec![CPE_Q, CPE_N]}
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let q = params[0];
         let n = params[1];
@@ -168,17 +198,23 @@ impl Circuit for CPE {
 /// The base for parallel and series circuits
 pub struct ComplexCirc {
     c : Vec<Box<dyn Circuit>>,
-    params : Vec<ParameterBase>
+    //params : Vec<ParameterBase>
 }
 impl ComplexCirc {
     pub fn new(circ: Vec<Box<dyn Circuit>>) -> ComplexCirc {
-        let mut pt: Vec<ParameterBase> = vec![];
-        for c in &circ {
-            for p in c.paramlist() {
-                pt.push(p.clone());
-            }
-        }
-        ComplexCirc{c: circ, params: pt}
+        //for c in &circ {
+        //    for p in c.paramlist() {
+                //pt.push(p.clone());
+        //    }
+        //}
+        ComplexCirc{c: circ/*, params: pt*/}
+    }
+
+    fn complex_paramlist(&self) -> Vec<ParameterBase> {
+        self.c
+            .iter()
+            .map(|x| x.paramlist())
+            .fold(vec![], |mut a, b| {a.extend(b); a})
     }
 }
 
@@ -205,8 +241,20 @@ pub struct Series { pub elems : ComplexCirc }
 pub struct Parallel { pub elems : ComplexCirc }
 
 
+impl std::fmt::Debug for Series {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "[")?;
+        for c in &self.elems.c {
+            c.fmt(f)?;
+        }
+        write!(f, "]")
+    }
+}
+
 impl Circuit for Series {
-    fn paramlist(&self) -> &[ParameterBase] {&self.elems.params}
+    fn paramlist(&self) -> Vec<ParameterBase> {
+        self.elems.complex_paramlist()
+    }
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let mut cval = 0;
         let mut imped = Cplx::new(0.0, 0.0);
@@ -242,10 +290,42 @@ impl Circuit for Series {
         }
     }
     
+    fn replace(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>> {
+        if self.elems.c.len() == 1 {
+            Some(element)
+        }
+        else {
+            let mut start_x = 0_u16;
+            for el in &mut self.elems.c {
+                let elemsize = el.painted_size();
+                if start_x + elemsize.0 > coord.0 {
+                    if coord.1 < elemsize.1 {
+                        if let Some(rp) = el.replace((coord.0 - start_x, coord.1), element) {
+                            *el = rp;
+                        }
+                    }
+                    return None;
+                }
+                start_x += elemsize.0;
+            }
+            None
+        }
+    }
 }
 
+impl std::fmt::Debug for Parallel {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{{")?;
+        for c in &self.elems.c {
+            c.fmt(f)?;
+        }
+        write!(f, "}}")
+    }
+}
 impl Circuit for Parallel {
-    fn paramlist(&self) -> &[ParameterBase] {&self.elems.params}
+    fn paramlist(&self) -> Vec<ParameterBase> {
+        self.elems.complex_paramlist()
+    }
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let mut cval = 0;
         let mut admit = Cplx::new(0.0, 0.0);
@@ -278,7 +358,8 @@ impl Circuit for Parallel {
         for c in &self.elems.c {
             let psize = c.painted_size().0;
             let drawend = pos.0 + (xsize as f64)*blocksize;
-            let elemstart = ((xsize-psize) as f64)/2.0*blocksize + pos.0;
+            let elemblock = (xsize-2-psize)/2 + 1;
+            let elemstart = (elemblock as f64)*blocksize + pos.0;
             let elemend = elemstart + (psize as f64)*blocksize;
             c.paint( ctx, blocksize, (elemstart, y) );
 
@@ -296,6 +377,38 @@ impl Circuit for Parallel {
         }
     }
 
+    fn replace(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>> {
+        if self.elems.c.len() == 1 {
+            Some(element)
+        }
+        else {
+            let wsize = self.painted_size();
+            if coord.1 < wsize.1 && (coord.0 == 0 || coord.0 == wsize.0-1) {
+                return Some(element);
+            }
+
+            let xsize = self.painted_size().0;
+
+            let mut start_coord = (0_u16, 0_u16);
+            for el in &mut self.elems.c {
+                let elemsize = el.painted_size();
+                if start_coord.1 + elemsize.1 > coord.1 {
+                    let psize = el.painted_size().0;
+                    let elemblock = (xsize-2-psize)/2 + 1;
+
+                    if coord.0 >= elemblock && coord.0 < elemblock+psize {
+                        if let Some(rp) = el.replace((coord.0 - elemblock, coord.1 - start_coord.1), element) {
+                            *el = rp;
+                        }
+                    }
+                    return None;
+                }
+                start_coord = (start_coord.0, start_coord.1 + elemsize.1);
+            }
+            None
+        }
+
+    }
 }
 
 
