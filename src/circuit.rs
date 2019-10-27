@@ -73,6 +73,7 @@ pub struct Inductor {}
 pub struct Warburg {}
 pub struct CPE {}
 
+/// Paint a sign under the element
 fn sign_element(ctx: &cairo::Context, text: &str, pos: (f64, f64), blocksize: f64) {
     ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
     ctx.set_font_size(blocksize*3./4.);
@@ -90,11 +91,7 @@ impl Circuit for Resistor {
         ctx.move_to(pos.0, pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
 
-        ctx.move_to(pos.0 + blocksize/4., pos.1 + blocksize/4.);
-        ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize*3./4.);
-        ctx.line_to(pos.0 + blocksize*7./4., pos.1 + blocksize*3./4.);
-        ctx.line_to(pos.0 + blocksize*7./4., pos.1 + blocksize/4.);
-        ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize/4.);
+        ctx.rectangle(pos.0 + blocksize/4., pos.1 + blocksize/4., blocksize*3./2., blocksize/2.);
 
         ctx.move_to(pos.0 + blocksize*7./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
