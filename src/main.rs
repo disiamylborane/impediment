@@ -285,7 +285,6 @@ fn main() {
 
                 Inhibit(false)
             });
-
             main_window.show_all();
         });
 
