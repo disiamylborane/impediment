@@ -34,7 +34,7 @@ struct Model {
 static mut g_model : Option<Model> = None;
 
 #[allow(non_upper_case_globals)]
-const g_blocksize : f64 = 20.0;
+const g_blocksize : f64 = 15.0;
 
 
 
@@ -248,7 +248,7 @@ fn main() {
                 }
                 else if rb_edit_parallel.get_active() {
                     // TODO: implement
-                    //model.circ.add_parallel((x, y), newelem);
+                    model.circ.add_parallel((x, y), newelem);
                 }
                 else {
                     panic!();
@@ -275,12 +275,7 @@ fn main() {
                 if let Some((x,y)) = block_by_coords(&model, &wid, &event) {
                     let newelem: Box<dyn Circuit> = create_user_element();
 
-                    println!("....at cell {:?}", (x, y));
-
-                    //model.circ.replace((x, y), newelem);
                     perform_user_edit(model, x,y, newelem);
-                    println!("....{:?}", model.circ);
-                    println!("....{:?}", g_model.as_ref().unwrap().circ);
 
                     remake_param_list(&cp, &wid);
                     wid.queue_draw();
