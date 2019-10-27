@@ -49,11 +49,14 @@ pub trait Circuit : std::fmt::Debug {
         return self._impedance(omega, params);
     }
 
-    fn replace(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>> {
+    fn replace(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>>{
+        Some(element)
+    }
+
+    fn add_series(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>>{
         Some(element)
     }
 }
-
 
 // Basic circuit elements
 
@@ -132,6 +135,10 @@ impl Circuit for Capacitor {
 
         ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
+
+        ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
+        ctx.set_font_size(blocksize*3./4.);
+        ctx.show_text(&"C");
     }
 }
 impl Circuit for Inductor {
@@ -142,7 +149,25 @@ impl Circuit for Inductor {
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
-        // TODO Implement
+        ctx.move_to(pos.0, pos.1 + blocksize/2.);
+        ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
+
+        //ctx.move_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
+        ctx.curve_to(pos.0 + blocksize*5./12., pos.1,
+                     pos.0 + blocksize*7./12., pos.1,
+                     pos.0 + blocksize*9./12., pos.1 + blocksize/2.);
+        ctx.curve_to(pos.0 + blocksize*11./12., pos.1,
+                     pos.0 + blocksize*13./12., pos.1,
+                     pos.0 + blocksize*15./12., pos.1 + blocksize/2.);
+        ctx.curve_to(pos.0 + blocksize*17./12., pos.1,
+                     pos.0 + blocksize*19./12., pos.1,
+                     pos.0 + blocksize*21./12., pos.1 + blocksize/2.);
+
+        ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
+
+        ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
+        ctx.set_font_size(blocksize*3./4.);
+        ctx.show_text(&"L");
     }
 }
 impl Circuit for Warburg {
@@ -240,6 +265,22 @@ impl ComplexCirc {
 pub struct Series { pub elems : ComplexCirc } 
 pub struct Parallel { pub elems : ComplexCirc }
 
+impl Series {
+    fn _index_by_block(&self, block: (u16, u16)) -> Option<(usize, u16)> {
+        let mut start_x = 0_u16;
+        for (i, el) in &mut self.elems.c.iter().enumerate() {
+            let elemsize = el.painted_size();
+            if start_x + elemsize.0 > block.0 {
+                if block.1 < elemsize.1 {
+                    return Some((i, start_x));
+                }
+                return None;
+            }
+            start_x += elemsize.0;
+        }
+        None
+    }
+}
 
 impl std::fmt::Debug for Series {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -289,27 +330,60 @@ impl Circuit for Series {
             x += c.painted_size().0 as f64 * blocksize;
         }
     }
-    
+
     fn replace(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>> {
         if self.elems.c.len() == 1 {
             Some(element)
         }
         else {
-            let mut start_x = 0_u16;
-            for el in &mut self.elems.c {
-                let elemsize = el.painted_size();
-                if start_x + elemsize.0 > coord.0 {
-                    if coord.1 < elemsize.1 {
-                        if let Some(rp) = el.replace((coord.0 - start_x, coord.1), element) {
-                            *el = rp;
-                        }
-                    }
-                    return None;
+            if let Some((i,start_x)) = self._index_by_block(coord) {
+                let el = &mut self.elems.c[i];
+                if let Some(rp) = el.replace((coord.0 - start_x, coord.1), element) {
+                    *el = rp;
                 }
-                start_x += elemsize.0;
             }
             None
         }
+    }
+
+    fn add_series(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>>{
+        if let Some((i, _start_x)) = self._index_by_block(coord) {
+            self.elems.c.insert(i, element);
+        }
+        None
+    }
+}
+
+enum ParallelBlockPicked {
+    Child(usize, u16, u16),
+    This,
+    None
+}
+
+impl Parallel {
+    fn _index_by_block(&self, block: (u16, u16)) -> ParallelBlockPicked {
+            let wsize = self.painted_size();
+            if block.1 < wsize.1 && (block.0 == 0 || block.0 == wsize.0-1) {
+                return ParallelBlockPicked::This;
+            }
+
+            let xsize = self.painted_size().0;
+
+            let mut start_coord_y = 0_u16;
+            for (i,el) in &mut self.elems.c.iter().enumerate() {
+                let elemsize = el.painted_size();
+                if start_coord_y + elemsize.1 > block.1 {
+                    let psize = el.painted_size().0;
+                    let elemblock = (xsize-2-psize)/2 + 1;
+
+                    if block.0 >= elemblock && block.0 < elemblock+psize {
+                        return ParallelBlockPicked::Child(i, elemblock, start_coord_y);
+                    }
+                    return ParallelBlockPicked::This;
+                }
+                start_coord_y += elemsize.1;
+            }
+            ParallelBlockPicked::None
     }
 }
 
@@ -382,32 +456,20 @@ impl Circuit for Parallel {
             Some(element)
         }
         else {
-            let wsize = self.painted_size();
-            if coord.1 < wsize.1 && (coord.0 == 0 || coord.0 == wsize.0-1) {
-                return Some(element);
-            }
+            let ib = self._index_by_block(coord);
 
-            let xsize = self.painted_size().0;
-
-            let mut start_coord = (0_u16, 0_u16);
-            for el in &mut self.elems.c {
-                let elemsize = el.painted_size();
-                if start_coord.1 + elemsize.1 > coord.1 {
-                    let psize = el.painted_size().0;
-                    let elemblock = (xsize-2-psize)/2 + 1;
-
-                    if coord.0 >= elemblock && coord.0 < elemblock+psize {
-                        if let Some(rp) = el.replace((coord.0 - elemblock, coord.1 - start_coord.1), element) {
-                            *el = rp;
-                        }
-                    }
-                    return None;
+            match ib {
+                ParallelBlockPicked::This => Some(element),
+                ParallelBlockPicked::None => None,
+                ParallelBlockPicked::Child(i, elemblock, start_y) => {
+                    let el = &mut self.elems.c[i];
+                    if let Some(rp) = el.replace((coord.0 - elemblock, coord.1 - start_y), element) {
+                        *el = rp;
+                    };
+                    None
                 }
-                start_coord = (start_coord.0, start_coord.1 + elemsize.1);
             }
-            None
         }
-
     }
 }
 

@@ -28,8 +28,15 @@ struct Model {
     params : ParameterDesc
 }
 
+
+
 #[allow(non_upper_case_globals)]
 static mut g_model : Option<Model> = None;
+
+#[allow(non_upper_case_globals)]
+const g_blocksize : f64 = 20.0;
+
+
 
 impl ParameterDesc{
     fn new(paramlist: &[ParameterBase]) -> Self {
@@ -55,7 +62,7 @@ fn draw(widget: &gtk::DrawingArea, context: &cairo::Context){
                 let widsize = (winalloc.width, winalloc.height);
 
                 if true {
-                    let blocksize: f64 = 20.;
+                    let blocksize: f64 = g_blocksize;
                     model.circ.paint(&context, blocksize, (
                         (widsize.0 as f64-size.0 as f64 * blocksize)/2., 
                         (widsize.1 as f64-size.1 as f64 * blocksize)/2.)
@@ -63,7 +70,7 @@ fn draw(widget: &gtk::DrawingArea, context: &cairo::Context){
                 }
 
                 for i in 0..model.params.vals.len() {
-                    context.move_to(20., 70.+(i as f64)*20.);
+                    context.move_to(g_blocksize, 70.+(i as f64)*g_blocksize);
                     context.show_text(&model.params.vals[i].to_string());
                 }
 
@@ -86,9 +93,10 @@ fn remake_param_list(parambox: &gtk::Box, graph: &gtk::DrawingArea) {
             parambox.remove(&w);
         }
 
-        let _model = g_model.as_ref().unwrap();
+        let _model = g_model.as_mut().unwrap();
         println!("..creating boxes..{:?}", _model.circ);
-        let params = ParameterDesc::new(&(_model.circ).paramlist());
+        _model.params = ParameterDesc::new(&(_model.circ).paramlist());
+        let params = &mut _model.params;
 
         println!("Parameter len: {}", params.vals.len());
 
@@ -156,10 +164,30 @@ fn remake_param_list(parambox: &gtk::Box, graph: &gtk::DrawingArea) {
     }
 }
 
+fn block_by_coords(model: &Model, wid: &gtk::DrawingArea, event: &gdk::EventButton) 
+    -> Option<(u16, u16)>
+{
+    let winalloc = wid.get_allocation();
+    let (wx, wy) = (winalloc.width as f64, winalloc.height as f64);
+    let (xpos, ypos) = event.get_position();
+    let (i_sx, i_sy) = model.circ.painted_size();
+
+    let (sx,sy) = (i_sx as f64 * g_blocksize, i_sy as f64 * g_blocksize);
+
+    let (xcirc, ycirc) = (xpos - (wx-sx)/2., ypos-(wy-sy)/2.);
+    if xcirc < 0. || ycirc < 0. {return None;}
+
+    let (x,y) = (xcirc / g_blocksize, ycirc / g_blocksize);
+
+    Some((x as u16, y as u16))
+}
+
+
+
 fn main() {
     let circ : Box<dyn Circuit> =  
         Box::new(Series{elems: ComplexCirc::new(vec![
-            Box::new(Resistor{}),
+            Box::new(Inductor{}),
             Box::new(Parallel{elems: ComplexCirc::new(vec![
                 Box::new(CPE{}),
                 Box::new(Series{elems: ComplexCirc::new(vec![
@@ -199,49 +227,23 @@ fn main() {
 
                 let model = g_model.as_mut().unwrap();
 
-                let winalloc = wid.get_allocation();
-                let (wx, wy) = (winalloc.width as f64, winalloc.height as f64);
-                let (xpos, ypos) = event.get_position();
-                let (i_sx, i_sy) = model.circ.painted_size();
+                if let Some((x,y)) = block_by_coords(&model, &wid, &event) {
+                    let newelem: Box<dyn Circuit> = Box::new(Resistor{});
 
-                // TODO: unhardcode 20
-                let (sx,sy) = (i_sx as f64 * 20., i_sy as f64 * 20.);
+                    println!("....at cell {:?}", (x, y));
 
-                let (xcirc, ycirc) = (xpos - (wx-sx)/2., ypos-(wy-sy)/2.);
-                if xcirc < 0. || ycirc < 0. {return Inhibit(false);}
+                    model.circ.replace((x, y), newelem);
+                    println!("....{:?}", model.circ);
+                    println!("....{:?}", g_model.as_ref().unwrap().circ);
 
-                let (x,y) = (xcirc / 20., ycirc / 20.);
-
-                let newelem: Box<dyn Circuit> = Box::new(Resistor{});
-
-                println!("....at cell {:?}", (x as u16, y  as u16));
-
-                model.circ.replace((x as u16, y  as u16), newelem);
-                println!("....{:?}", model.circ);
-                println!("....{:?}", g_model.as_ref().unwrap().circ);
-
-                remake_param_list(&cp, &wid);
-                wid.queue_draw();
+                    remake_param_list(&cp, &wid);
+                    wid.queue_draw();
+                }
 
                 Inhibit(false)
             });
 
-            //let openbtn: gtk::Button = builder.get_object("b_open_model").unwrap();
-
-            /*openbtn.connect_clicked(move |_btn| {
-                g_model.as_mut().unwrap().circ =  
-                    Box::new(Series{elems: ComplexCirc::new(vec![
-                        Box::new(Capacitor{}),
-                        Box::new(Warburg{}),
-                    ])});
-
-                remake_param_list(&cp, &g);
-                g.queue_draw();
-
-            });*/
-
             remake_param_list(&cpbox, &graph);
-
             main_window.show_all();
         });
 
