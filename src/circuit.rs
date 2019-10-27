@@ -26,8 +26,7 @@ pub const CPE_N:      ParameterBase = ParameterBase {letter: 'n', limits: (0.0, 
 
 /// An unaided circuit having its own
 /// parameter set and frequency response
-
-pub trait Circuit : std::fmt::Debug {
+pub trait Circuit {
     /// A circuit-specific routine to calculate the impedance
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx;
 
@@ -38,7 +37,7 @@ pub trait Circuit : std::fmt::Debug {
     /// A size of painted circuit in <blocks>
     fn painted_size(&self) -> (u16, u16) {(2,2)}
 
-    /// A size of painted circuit in <blocks>
+    /// Draw a circuit(subcircuit) on a widget
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64));
 
     /// Calculate the impedance value
@@ -60,6 +59,10 @@ pub trait Circuit : std::fmt::Debug {
     fn add_parallel(&mut self, coord: (u16, u16), element: Box<dyn Circuit>) -> Option<Box<dyn Circuit>>{
         Some(element)
     }
+
+    fn remove(&mut self, coord: (u16, u16)) -> Option<()>{
+        Some(())
+    }
 }
 
 // Basic circuit elements
@@ -70,30 +73,10 @@ pub struct Inductor {}
 pub struct Warburg {}
 pub struct CPE {}
 
-impl std::fmt::Debug for Resistor {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "R")
-    }
-}
-impl std::fmt::Debug for Capacitor {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "C")
-    }
-}
-impl std::fmt::Debug for Inductor {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "L")
-    }
-}
-impl std::fmt::Debug for Warburg {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "W")
-    }
-}
-impl std::fmt::Debug for CPE {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Q")
-    }
+fn sign_element(ctx: &cairo::Context, text: &str, pos: (f64, f64), blocksize: f64) {
+    ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
+    ctx.set_font_size(blocksize*3./4.);
+    ctx.show_text(text);
 }
 
 impl Circuit for Resistor {
@@ -116,9 +99,7 @@ impl Circuit for Resistor {
         ctx.move_to(pos.0 + blocksize*7./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
 
-        ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
-        ctx.set_font_size(blocksize*3./4.);
-        ctx.show_text(&"R");
+        sign_element(ctx, &"R", pos, blocksize);
     }
 }
 impl Circuit for Capacitor {
@@ -140,9 +121,7 @@ impl Circuit for Capacitor {
         ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
 
-        ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
-        ctx.set_font_size(blocksize*3./4.);
-        ctx.show_text(&"C");
+        sign_element(ctx, &"C", pos, blocksize);
     }
 }
 impl Circuit for Inductor {
@@ -156,7 +135,6 @@ impl Circuit for Inductor {
         ctx.move_to(pos.0, pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
 
-        //ctx.move_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
         ctx.curve_to(pos.0 + blocksize*5./12., pos.1,
                      pos.0 + blocksize*7./12., pos.1,
                      pos.0 + blocksize*9./12., pos.1 + blocksize/2.);
@@ -169,9 +147,7 @@ impl Circuit for Inductor {
 
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
 
-        ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
-        ctx.set_font_size(blocksize*3./4.);
-        ctx.show_text(&"L");
+        sign_element(ctx, &"L", pos, blocksize);
     }
 }
 impl Circuit for Warburg {
@@ -194,6 +170,8 @@ impl Circuit for Warburg {
 
         ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
+
+        sign_element(ctx, &"W", pos, blocksize);
     }
 }
 impl Circuit for CPE {
@@ -220,23 +198,19 @@ impl Circuit for CPE {
 
         ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
         ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
+
+        sign_element(ctx, &"Q", pos, blocksize);
     }
 }
 
 
 /// The base for parallel and series circuits
 pub struct ComplexCirc {
-    c : Vec<Box<dyn Circuit>>,
-    //params : Vec<ParameterBase>
+    c : Vec<Box<dyn Circuit>>
 }
 impl ComplexCirc {
     pub fn new(circ: Vec<Box<dyn Circuit>>) -> ComplexCirc {
-        //for c in &circ {
-        //    for p in c.paramlist() {
-                //pt.push(p.clone());
-        //    }
-        //}
-        ComplexCirc{c: circ/*, params: pt*/}
+        ComplexCirc{c: circ}
     }
 
     fn complex_paramlist(&self) -> Vec<ParameterBase> {
@@ -286,16 +260,6 @@ impl Series {
     }
 }
 
-impl std::fmt::Debug for Series {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "[")?;
-        for c in &self.elems.c {
-            c.fmt(f)?;
-        }
-        write!(f, "]")
-    }
-}
-
 impl Circuit for Series {
     fn paramlist(&self) -> Vec<ParameterBase> {
         self.elems.complex_paramlist()
@@ -313,11 +277,10 @@ impl Circuit for Series {
         return imped;
     }
 
-    /// A size of painted circuit in <blocks>
     fn painted_size(&self) -> (u16, u16) {
         let s = self.elems.c.iter().map(|x| x.painted_size()).fold((0,0), |a, b| (a.0+b.0, std::cmp::max(a.1,b.1)));
 
-        (s.0 /*+ ((self.elems.c.len()-1) as u16)*/, s.1)
+        (s.0, s.1)
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
@@ -327,9 +290,6 @@ impl Circuit for Series {
         x += self.elems.c[0].painted_size().0 as f64 * blocksize;
         
         for c in &self.elems.c[1..] {
-            //ctx.move_to(x, pos.1 + blocksize/2.);
-            //ctx.line_to(x + blocksize, pos.1 + blocksize/2.);
-            //x += blocksize;
             c.paint( ctx, blocksize, (x, y) );
             x += c.painted_size().0 as f64 * blocksize;
         }
@@ -375,6 +335,21 @@ impl Circuit for Series {
             Some(element)
         }
     }
+
+    fn remove(&mut self, coord: (u16, u16)) -> Option<()>{
+        if self.elems.c.len() == 1 {
+            Some(())
+        }
+        else {
+            if let Some((i,start_x)) = self._index_by_block(coord) {
+                let el = &mut self.elems.c[i];
+                if let Some(_) = el.remove((coord.0 - start_x, coord.1)) {
+                    self.elems.c.remove(i);
+                }
+            }
+            None
+        }
+    }
 }
 
 enum ParallelBlockPicked {
@@ -410,15 +385,6 @@ impl Parallel {
     }
 }
 
-impl std::fmt::Debug for Parallel {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{{")?;
-        for c in &self.elems.c {
-            c.fmt(f)?;
-        }
-        write!(f, "}}")
-    }
-}
 impl Circuit for Parallel {
     fn paramlist(&self) -> Vec<ParameterBase> {
         self.elems.complex_paramlist()
@@ -534,6 +500,30 @@ impl Circuit for Parallel {
             }
             ParallelBlockPicked::None => {
                 None
+            }
+        }
+    }
+
+    fn remove(&mut self, coord: (u16, u16)) -> Option<()>{
+        if self.elems.c.len() == 1 {
+            Some(())
+        }
+        else {
+            let ib = self._index_by_block(coord);
+
+            match ib {
+                ParallelBlockPicked::Child(i, elemblock, start_y) => {
+                    if let Some(_) = self.elems.c[i].remove((coord.0-elemblock, coord.1-start_y)) {
+                        self.elems.c.remove(i);
+                    }
+                    None
+                }
+                ParallelBlockPicked::This => {
+                    Some(())
+                }
+                ParallelBlockPicked::None => {
+                    None
+                }
             }
         }
     }

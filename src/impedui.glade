@@ -238,7 +238,7 @@
                         <property name="can_focus">False</property>
                         <child>
                           <object class="GtkRadioButton" id="rb_edit_replace">
-                            <property name="label" translatable="yes">x</property>
+                            <property name="label" translatable="yes">:</property>
                             <property name="visible">True</property>
                             <property name="can_focus">True</property>
                             <property name="receives_default">False</property>
@@ -253,7 +253,7 @@
                         </child>
                         <child>
                           <object class="GtkRadioButton" id="rb_edit_series">
-                            <property name="label" translatable="yes">--</property>
+                            <property name="label" translatable="yes">- -</property>
                             <property name="visible">True</property>
                             <property name="can_focus">True</property>
                             <property name="receives_default">False</property>
@@ -279,6 +279,22 @@
                             <property name="expand">False</property>
                             <property name="fill">True</property>
                             <property name="position">2</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkRadioButton" id="rb_edit_remove">
+                            <property name="label" translatable="yes">x</property>
+                            <property name="visible">True</property>
+                            <property name="can_focus">True</property>
+                            <property name="receives_default">False</property>
+                            <property name="active">True</property>
+                            <property name="draw_indicator">True</property>
+                            <property name="group">rb_edit_replace</property>
+                          </object>
+                          <packing>
+                            <property name="expand">False</property>
+                            <property name="fill">True</property>
+                            <property name="position">3</property>
                           </packing>
                         </child>
                       </object>
