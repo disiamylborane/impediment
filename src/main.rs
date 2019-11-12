@@ -297,7 +297,6 @@ fn main() {
     let params = ParameterDesc::new(&circ.paramlist());
 
     unsafe {g_model = Some(Model{circ, params});}
-    unsafe {g_experimental = Some(load::load_csv_freq_re_im("example.csv").unwrap());}
 
     let app = gtk::Application::new(Some("app.impediment"), Default::default()).expect("GTK failed");
 
@@ -352,8 +351,33 @@ fn main() {
 
         cb_method.set_active(Some(0));
 
-        builder.get_object::<gtk::Button>("bFit").
-            unwrap()
+        let main_window_open = main_window.clone();
+        builder.get_object::<gtk::Button>("b_open_data")
+            .unwrap()
+            .connect_clicked(move |_btn| {
+                let dialog = gtk::FileChooserDialog::new(
+                    Some("Open data file"), 
+                    Some(&main_window_open), 
+                    gtk::FileChooserAction::Open);
+                dialog.add_button("Open", gtk::ResponseType::Ok.into());
+                dialog.add_button("Cancel", gtk::ResponseType::Cancel.into());
+                let runres = dialog.run();
+                let filename = dialog.get_filename();
+                dialog.destroy();
+                if runres == gtk::ResponseType::Ok {
+                    if let Some(filename) = filename {
+                        if let Some(filename) = filename.to_str() {
+                            match load::load_csv_freq_re_im(filename) {
+                                Ok(data) => { unsafe{g_experimental = Some(data);} }
+                                Err(err) => { println!("{}", err);}
+                            }
+                        }
+                    }
+                }
+            });
+
+        builder.get_object::<gtk::Button>("bFit")
+            .unwrap()
             .connect_clicked(move |_btn| {
                 let model = unsafe{g_model.as_mut().unwrap()};
 

@@ -8,8 +8,8 @@ pub struct ParameterDesc {
 }
 impl ParameterDesc{
     pub fn new(paramlist: &[ParameterBase]) -> Self {
-        let vals = paramlist.iter().map(|x| x.default).collect::<Vec<_>>();;
-        let bounds = paramlist.iter().map(|x| x.limits).collect::<Vec<_>>();;
+        let vals = paramlist.iter().map(|x| x.default).collect::<Vec<_>>();
+        let bounds = paramlist.iter().map(|x| x.limits).collect::<Vec<_>>();
 
         ParameterDesc{vals, bounds}
     }
