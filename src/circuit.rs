@@ -30,6 +30,8 @@ pub trait Circuit {
     /// A circuit-specific routine to calculate the impedance
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx;
 
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx;
+
     /// Get a list of all circuit parameters. The parameter values are to provide
     /// when calculating the impedance.
     fn paramlist(&self) -> Vec<ParameterBase>;
@@ -66,11 +68,15 @@ pub trait Circuit {
 }
 
 // Basic circuit elements
-
+#[derive(Debug)]
 pub struct Resistor {}
+#[derive(Debug)]
 pub struct Capacitor {}
+#[derive(Debug)]
 pub struct Inductor {}
+#[derive(Debug)]
 pub struct Warburg {}
+#[derive(Debug)]
 pub struct CPE {}
 
 /// Paint a sign under the element
@@ -85,6 +91,9 @@ impl Circuit for Resistor {
     fn _impedance(&self, _omega: f64, params: &[f64]) -> Cplx {
         let r = params[0];
         Cplx::new(r, 0.0)
+    }
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        match dparam {0 => Cplx::new(1.0, 0.0), _ => panic!("Gradient requested for {} parameter of {:?}", dparam, self)}
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
@@ -104,6 +113,11 @@ impl Circuit for Capacitor {
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let c = params[0];
         1.0 / (Cplx::new(0.0, 1.0) * omega * c)
+    }
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        match dparam {
+            0 => {Cplx::new(0.0, 1.0) / (omega * params[1].powi(2))}
+            _ => panic!("Gradient requested for {} parameter of {:?}", dparam, self)}
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
@@ -126,6 +140,12 @@ impl Circuit for Inductor {
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         let l = params[0];
         Cplx::new(0.0, 1.0) * omega * l
+    }
+    
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        match dparam {
+            0 => {Cplx::new(0.0, 1.0) * omega}
+            _ => panic!("Gradient requested for {} parameter of {:?}", dparam, self)}
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
@@ -154,6 +174,11 @@ impl Circuit for Warburg {
         let sqrtom = omega.sqrt();
         aw/sqrtom + aw/(Cplx::new(0.0, 1.0)*sqrtom)
     }
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        match dparam {
+            0 => {(1.0 - Cplx::new(0.0, 1.0)) / omega.sqrt()}
+            _ => panic!("Gradient requested for {} parameter of {:?}", dparam, self)}
+    }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
         ctx.move_to(pos.0, pos.1 + blocksize/2.);
@@ -179,6 +204,17 @@ impl Circuit for CPE {
         let numer = (-I*PI/2.0*n).exp();
         let denom = q * omega.powf(n);
         numer/denom
+    }
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        let q = params[0];
+        let n = params[1];
+        let numer = (-I*PI/2.0*n).exp();
+        let denom = q * omega.powf(n);
+        match dparam {
+            0 => {-numer/denom/q}
+            1 => {-(omega.ln() + I*PI/2.0)*numer/denom}
+            _ => panic!("Gradient requested for {} parameter of {:?}", dparam, self)
+        }
     }
 
     fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
@@ -273,6 +309,20 @@ impl Circuit for Series {
         }
         return imped;
     }
+
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        let mut cval = 0;
+        for c in &self.elems.c {
+            let cend = cval + c.paramlist().len();
+            let slc = &params[cval..cend];
+            if cval <= dparam && dparam<cend {
+                return c._d_impedance(omega, slc, dparam-cval);
+            }
+            cval = cend;
+        }
+        unreachable!()
+    }
+
 
     fn painted_size(&self) -> (u16, u16) {
         let s = self.elems.c.iter().map(|x| x.painted_size()).fold((0,0), |a, b| (a.0+b.0, std::cmp::max(a.1,b.1)));
@@ -397,6 +447,20 @@ impl Circuit for Parallel {
             cval = cend;
         }
         return 1.0/admit;
+    }
+
+    fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        let mut cval = 0;
+        for c in &self.elems.c {
+            let cend = cval + c.paramlist().len();
+            let slc = &params[cval..cend];
+            if cval <= dparam && dparam<cend {
+                let denommed = self._impedance(omega, params);
+                return denommed.powi(2) / c.impedance(omega, slc).powi(2) * c._d_impedance(omega, params, dparam-cval);
+            }
+            cval = cend;
+        }
+        unreachable!()
     }
 
     /// A size of painted circuit in <blocks>
