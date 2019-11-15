@@ -116,7 +116,7 @@ impl Circuit for Capacitor {
     }
     fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
         match dparam {
-            0 => {Cplx::new(0.0, 1.0) / (omega * params[1].powi(2))}
+            0 => {Cplx::new(0.0, 1.0) / (omega * params[0].powi(2))}
             _ => panic!("Gradient requested for {} parameter of {:?}", dparam, self)}
     }
 
@@ -456,7 +456,7 @@ impl Circuit for Parallel {
             let slc = &params[cval..cend];
             if cval <= dparam && dparam<cend {
                 let denommed = self._impedance(omega, params);
-                return denommed.powi(2) / c.impedance(omega, slc).powi(2) * c._d_impedance(omega, params, dparam-cval);
+                return denommed.powi(2) / c.impedance(omega, slc).powi(2) * c._d_impedance(omega, slc, dparam-cval);
             }
             cval = cend;
         }
