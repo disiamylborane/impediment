@@ -19,7 +19,7 @@ impl ParameterDesc{
 /// * The circuit description and metadata
 /// * Its current parameters and bounds
 pub struct Model {
-    pub circ : Box<dyn Circuit>,
+    pub circ : Circuit,
     pub params : ParameterDesc
 }
 

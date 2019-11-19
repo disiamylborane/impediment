@@ -157,28 +157,28 @@ fn block_by_coords(model: &Model, wid: &gtk::DrawingArea, event: &gdk::EventButt
 /// Build a function that returns the circuit element chosen by the user
 /// 
 /// [Resistor, Inductor or CPE?]
-fn build_element_selector(builder: &gtk::Builder) -> impl Fn() -> Box<dyn Circuit> {
+fn build_element_selector(builder: &gtk::Builder) -> impl Fn() -> Circuit {
     let rb_element_r: gtk::RadioButton = builder.get_object("rb_element_r").unwrap();
     let rb_element_c: gtk::RadioButton = builder.get_object("rb_element_c").unwrap();
     let rb_element_w: gtk::RadioButton = builder.get_object("rb_element_w").unwrap();
     let rb_element_l: gtk::RadioButton = builder.get_object("rb_element_l").unwrap();
     let rb_element_q: gtk::RadioButton = builder.get_object("rb_element_q").unwrap();
 
-    let create_user_element = move || -> Box<dyn Circuit> {
+    let create_user_element = move || -> Circuit {
         if rb_element_r.get_active() {
-            Box::new(Resistor{})
+            Circuit::Element(Element::Resistor)
         }
         else if rb_element_c.get_active() {
-            Box::new(Capacitor{})
+            Circuit::Element(Element::Capacitor)
         }
         else if rb_element_w.get_active() {
-            Box::new(Warburg{})
+            Circuit::Element(Element::Warburg)
         }
         else if rb_element_l.get_active() {
-            Box::new(Inductor{})
+            Circuit::Element(Element::Inductor)
         }
         else if rb_element_q.get_active() {
-            Box::new(CPE{})
+            Circuit::Element(Element::CPE)
         }
         else {
             panic!();
@@ -201,16 +201,26 @@ fn build_circuit_editor(builder: &gtk::Builder) -> impl Fn(&mut Model, u16, u16)
     
     let perform_user_edit = move |model: &mut Model, x, y| {
         if rb_edit_replace.get_active() {
-            model.circ.replace((x, y), create_user_element());
+            if let Some(el) = model.circ.replace((x, y), create_user_element()) {
+                model.circ = el;
+            };
         }
         else if rb_edit_series.get_active() {
-            model.circ.add_series((x, y), create_user_element());
+            if let Some(el) = model.circ.add_series((x, y), create_user_element()) {
+                model.circ = Circuit::Series(vec![model.circ.clone(), el]);
+            }
         }
         else if rb_edit_parallel.get_active() {
-            model.circ.add_parallel((x, y), create_user_element());
+            if let Some(el) = model.circ.add_parallel((x, y), create_user_element()) {
+                model.circ = Circuit::Parallel(vec![model.circ.clone(), el]);
+            }
         }
         else if rb_edit_remove.get_active() {
-            model.circ.remove((x, y));
+            match model.circ.remove((x, y)) {
+                RemoveAction::DoNothing => {}
+                RemoveAction::ChangeTo(el) => {model.circ = el;}
+                RemoveAction::Remove => {}
+            }
         }
         else {
             panic!();
@@ -282,17 +292,43 @@ fn loss(params: &[f64], gradient_out: Option<&mut [f64]>) -> f64
     else {0.0}
 }
 
+
+fn user_filename<'a>(do_save: bool, title: &str, parent_window: &gtk::Window) -> Option<String>
+{
+    let dialog = gtk::FileChooserDialog::new(
+        Some(title), 
+        Some(parent_window), 
+        if do_save {gtk::FileChooserAction::Save} else {gtk::FileChooserAction::Open} 
+    );
+
+    dialog.add_button(if do_save {"Save"} else {"Open"}, gtk::ResponseType::Ok.into());
+    dialog.add_button("Cancel", gtk::ResponseType::Cancel.into());
+    let runres = dialog.run();
+    let filename = dialog.get_filename();
+    dialog.destroy();
+    if runres == gtk::ResponseType::Ok {
+        if let Some(filename) = filename {
+            if let Some(filename) = filename.to_str() {
+                return Some(filename.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+
 fn main() {
-    let circ : Box<dyn Circuit> = Box::new(Series{ elems: ComplexCirc::new(vec![
-        Box::new(Parallel {elems: ComplexCirc::new(vec![
-            Box::new(Series{ elems: ComplexCirc::new(vec![
-            Box::new(Resistor{}),
-            Box::new(Warburg{}),
-        ])}),
-        Box::new(Capacitor{}),
-        ])}),
-        Box::new(Resistor{}),
-    ])});
+    let circ = Circuit::Series(vec![
+        Circuit::Parallel(vec![
+            Circuit::Series(vec![
+                Circuit::Element(Element::Resistor),
+                Circuit::Element(Element::Warburg),
+            ]),
+            Circuit::Element(Element::Capacitor),
+        ]),
+        Circuit::Element(Element::Resistor),
+    ]);
 
     let params = ParameterDesc::new(&circ.paramlist());
 
@@ -350,29 +386,43 @@ fn main() {
         let cb_method = builder.get_object::<gtk::ComboBox>("cbMethod").unwrap();
 
         cb_method.set_active(Some(0));
+        
+        let main_window_save = main_window.clone();
+        builder.get_object::<gtk::Button>("b_save_model")
+            .unwrap()
+            .connect_clicked(move |_btn| {
+                match user_filename(true, "Save model", &main_window_save) {
+                    Some(filename) => {
+                        if let Ok(mut file) = std::fs::File::create(filename) {
+                            let model = unsafe { &g_model.as_ref().unwrap() };
+
+                            use std::io::Write;
+                            writeln!(&mut file, "{}", model.circ).unwrap();
+                            for p in 0..model.params.vals.len() {
+                                writeln!(&mut file, "{} ({}, {})", model.params.vals[p], model.params.bounds[p].0, model.params.bounds[p].1).unwrap();
+                            }
+                        }
+                        else {
+                            panic!();
+                        }
+                    }
+
+                    None => {}
+                }
+            });
 
         let main_window_open = main_window.clone();
         builder.get_object::<gtk::Button>("b_open_data")
             .unwrap()
             .connect_clicked(move |_btn| {
-                let dialog = gtk::FileChooserDialog::new(
-                    Some("Open data file"), 
-                    Some(&main_window_open), 
-                    gtk::FileChooserAction::Open);
-                dialog.add_button("Open", gtk::ResponseType::Ok.into());
-                dialog.add_button("Cancel", gtk::ResponseType::Cancel.into());
-                let runres = dialog.run();
-                let filename = dialog.get_filename();
-                dialog.destroy();
-                if runres == gtk::ResponseType::Ok {
-                    if let Some(filename) = filename {
-                        if let Some(filename) = filename.to_str() {
-                            match load::load_csv_freq_re_im(filename) {
-                                Ok(data) => { unsafe{g_experimental = Some(data);} }
-                                Err(err) => { println!("{}", err);}
-                            }
+                match user_filename(false, "Open data file", &main_window_open) {
+                    Some(filename) => {
+                        match load::load_csv_freq_re_im(&filename) {
+                            Ok(data) => { unsafe{g_experimental = Some(data);} }
+                            Err(err) => { println!("{}", err);}
                         }
                     }
+                    None => {}                    
                 }
             });
 
