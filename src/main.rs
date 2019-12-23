@@ -17,7 +17,7 @@ mod plotting;
 mod imped_math;
 use imped_math::*;
 
-mod load;
+mod file;
 
 #[allow(non_upper_case_globals)]
 static mut g_model : Option<Model> = None;
@@ -386,25 +386,14 @@ fn main() {
         let cb_method = builder.get_object::<gtk::ComboBox>("cbMethod").unwrap();
 
         cb_method.set_active(Some(0));
-        
+
         let main_window_save = main_window.clone();
         builder.get_object::<gtk::Button>("b_save_model")
             .unwrap()
             .connect_clicked(move |_btn| {
                 match user_filename(true, "Save model", &main_window_save) {
                     Some(filename) => {
-                        if let Ok(mut file) = std::fs::File::create(filename) {
-                            let model = unsafe { &g_model.as_ref().unwrap() };
-
-                            use std::io::Write;
-                            writeln!(&mut file, "{}", model.circ).unwrap();
-                            for p in 0..model.params.vals.len() {
-                                writeln!(&mut file, "{} ({}, {})", model.params.vals[p], model.params.bounds[p].0, model.params.bounds[p].1).unwrap();
-                            }
-                        }
-                        else {
-                            panic!();
-                        }
+                        file::save_model(unsafe{g_model.as_ref().unwrap()}, &filename).unwrap();
                     }
 
                     None => {}
@@ -417,13 +406,32 @@ fn main() {
             .connect_clicked(move |_btn| {
                 match user_filename(false, "Open data file", &main_window_open) {
                     Some(filename) => {
-                        match load::load_csv_freq_re_im(&filename) {
+                        match file::load_csv_freq_re_im(&filename) {
                             Ok(data) => { unsafe{g_experimental = Some(data);} }
                             Err(err) => { println!("{}", err);}
                         }
                     }
                     None => {}                    
                 }
+            });
+
+        let cpbox_openmodel = cpbox.clone();
+        let main_window_openmodel = main_window.clone();
+        builder.get_object::<gtk::Button>("b_open_model")
+            .unwrap()
+            .connect_clicked(move |_btn| {
+                match user_filename(false, "Open model", &main_window_openmodel) {
+                    Some(filename) => {
+                        match file::load_model(&filename, unsafe{g_model.as_mut().unwrap()}) {
+                            Ok(_) => { }
+                            Err(_) => { println!("Cannot load model from {}", filename);}
+                        }
+                    }
+                    None => {}                    
+                }
+
+                recreate_param_list(&cpbox_openmodel, &main_window_openmodel, false);
+                main_window_openmodel.queue_draw();
             });
 
         builder.get_object::<gtk::Button>("bFit")

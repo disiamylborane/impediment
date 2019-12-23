@@ -109,6 +109,80 @@ pub enum RemoveAction {
     Remove,
     ChangeTo(Circuit),
 }
+/*
+fn strslice_to_subcircuits(s: &str) -> Result<Circuit, ()> {
+    let buffer : Vec<Circuit> = vec![];
+    for c in s.chars() {
+        match c {
+            'R' => {buffer.push(Circuit::Element(Element::Resistor));}
+            'C' => {buffer.push(Circuit::Element(Element::Capacitor));}
+            'L' => {buffer.push(Circuit::Element(Element::Inductor));}
+            'W' => {buffer.push(Circuit::Element(Element::Warburg));}
+            'Q' => {buffer.push(Circuit::Element(Element::CPE));}
+        }
+    }
+}
+
+enum CircuitParseElement {Series, Parallel}
+*/
+enum CircuitParseElement {Circ(Circuit), Series, Parallel}
+
+impl std::str::FromStr for Circuit {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut stack : Vec<CircuitParseElement> = vec![];
+
+        for c in s.chars() {
+            match c {
+                'R' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Resistor)));}
+                'C' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Capacitor)));}
+                'L' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Inductor)));}
+                'W' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Warburg)));}
+                'Q' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::CPE)));}
+                '[' => {stack.push(CircuitParseElement::Series);}
+                '{' => {stack.push(CircuitParseElement::Parallel);}
+
+                ']' => {
+                    let mut elements : Vec<Circuit> = vec![];
+
+                    while let Some(v) = stack.pop() {
+                        match v {
+                            CircuitParseElement::Circ(c) => {elements.insert(0, c);}
+                            CircuitParseElement::Series => {break;}
+                            CircuitParseElement::Parallel => {return Err(());}
+                        }
+                    }
+
+                    stack.push(CircuitParseElement::Circ(Circuit::Series(elements)));
+                }
+
+                '}' => {
+                    let mut elements : Vec<Circuit> = vec![];
+
+                    while let Some(v) = stack.pop() {
+                        match v {
+                            CircuitParseElement::Circ(c) => {elements.insert(0, c);}
+                            CircuitParseElement::Series => {return Err(());}
+                            CircuitParseElement::Parallel => {break;}
+                        }
+                    }
+
+                    stack.push(CircuitParseElement::Circ(Circuit::Parallel(elements)));
+                }
+
+                _ => {return Err(())}
+            }
+        }
+
+        if stack.len() == 1 {
+            if let Some(CircuitParseElement::Circ(ret)) = stack.pop() {
+                return Ok(ret);
+            }
+        }
+        Err(())
+    }
+}
 
 impl std::fmt::Display for Circuit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
