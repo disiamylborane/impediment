@@ -5,20 +5,6 @@ extern crate cairo;
 use crate::imped_math::*;
 
 
-/// Get a viewport from a DrawingArea size
-fn viewport(area: V2) -> Bounds {
-    let minsize = if area.x < area.y {area.x} else {area.y};
-    if minsize < 10. {
-        return Bounds{min: V2{x:0., y:0.}, max: area};
-    }
-    let border = 
-        if minsize < 100. {5.} 
-        else { minsize/20. };
-
-    Bounds{min: V2{x:border, y:border}, max: V2{x: area.x-border, y: area.y-border}}
-}
-
-
 /// Ensure the point is inside the bounds 
 pub fn update_bounds(val: V2, bounds: &mut Bounds) {
     if bounds.min.x > val.x {
@@ -67,7 +53,45 @@ pub fn display(
     marker: DisplayMarker
 )
 {
-    let viewport = viewport(area_size);
+    let border = 5.;
+
+    // Setup axes
+    let minx = format!("{:.1e}", bounds.min.x);
+    let maxx = format!("{:.1e}", bounds.max.x);
+
+    let extents = ctx.text_extents(&maxx);
+
+    let miny = format!("{:.1e}", bounds.min.y);
+    let maxy = format!("{:.1e}", bounds.max.y);
+
+    let miny_size = ctx.text_extents(&miny);
+    let maxy_size = ctx.text_extents(&maxy);
+
+    let yticks_size = miny_size.width .max (maxy_size.width);
+
+    ctx.move_to(0., miny_size.height + border);
+    ctx.set_source_rgb(0.0, 0.0, 0.0);
+    ctx.show_text(&maxy);
+
+    ctx.move_to(0., area_size.y - 1. - extents.height - border);
+    ctx.set_source_rgb(0.0, 0.0, 0.0);
+    ctx.show_text(&miny);
+
+    ctx.move_to(yticks_size + border, area_size.y-1.);
+    ctx.set_source_rgb(0.0, 0.0, 0.0);
+    ctx.show_text(&minx);
+
+    ctx.move_to(area_size.x - border - extents.width, area_size.y-1.);
+    ctx.set_source_rgb(0.0, 0.0, 0.0);
+    ctx.show_text(&maxx);
+
+    let viewport = Bounds{min: V2{x: yticks_size + border, y: border}, max: V2{x: area_size.x-border, y: area_size.y-extents.height-border}};
+
+    ctx.rectangle(viewport.min.x, viewport.min.y, viewport.max.x-viewport.min.x, viewport.max.y-viewport.min.y);
+
+    ctx.set_source_rgb(0.0, 0.0, 0.0);
+    ctx.set_line_width(1.);
+    ctx.stroke();
 
     let draw_circle = |point: V2| {
         ctx.move_to(point.x, point.y);
@@ -94,10 +118,22 @@ pub fn display(
             DisplayMarker::Line => { ctx.line_to(point.x, point.y); }
         }
     }
+
+    match marker {
+        DisplayMarker::Ball => {
+            ctx.set_source_rgb(0.4, 0.4, 0.0);
+            ctx.fill();
+        }
+        DisplayMarker::Line => {
+            ctx.set_source_rgb(0.0, 0.0, 1.0);
+            ctx.set_line_width(2.);
+            ctx.stroke();
+        }
+    };
 }
 
 
-pub struct NiquistExtractor {}
+pub struct NyquistExtractor {}
 pub struct BodeAmpExtractor {}
 pub struct BodePhaseExtractor {}
 
@@ -106,7 +142,7 @@ pub trait DataExtractor {
     fn extract(val: DataPiece) -> V2;
 }
 
-impl DataExtractor for NiquistExtractor{
+impl DataExtractor for NyquistExtractor{
     fn extract(val: DataPiece) -> V2 {
         V2{x: val.imp.re, y: -val.imp.im}
     }

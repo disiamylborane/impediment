@@ -379,7 +379,7 @@ fn main() {
 
         builder.get_object::<gtk::DrawingArea>("graphR")
                 .unwrap()
-                .connect_draw(draw_graph::<plotting::NiquistExtractor>);
+                .connect_draw(draw_graph::<plotting::NyquistExtractor>);
 
         let main_window_byfit = main_window.clone();
 
