@@ -401,12 +401,13 @@ fn main() {
             });
 
         let main_window_open = main_window.clone();
+        let builder_loadfile_ref = builder.clone();
         builder.get_object::<gtk::Button>("b_open_data")
             .unwrap()
             .connect_clicked(move |_btn| {
                 match user_filename(false, "Open data file", &main_window_open) {
                     Some(filename) => {
-                        match file::load_csv_freq_re_im(&filename) {
+                        match file::load_csv(&filename, &builder_loadfile_ref, &main_window_open) {
                             Ok(data) => { unsafe{g_experimental = Some(data);} }
                             Err(err) => { println!("{}", err);}
                         }
