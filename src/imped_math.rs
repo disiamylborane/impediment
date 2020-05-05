@@ -18,9 +18,9 @@ impl ParameterDesc{
 /// A model description consists of
 /// * The circuit description and metadata
 /// * Its current parameters and bounds
-pub struct Model {
-    pub circ : Circuit,
-    pub params : ParameterDesc
+pub struct Model<'circ, 'params> {
+    pub circ : &'circ Circuit,
+    pub params : &'params ParameterDesc
 }
 
 
@@ -54,7 +54,7 @@ pub struct Bounds {
 
 /// Iterator for a `Model` providing `DataPiece` output for each of the given points (omega)
 pub struct ModelIter<'model> {
-    pub model : &'model Model,
+    pub model : Model<'model, 'model>,
     pub points : &'model mut dyn Iterator<Item=f64>,
 }
 

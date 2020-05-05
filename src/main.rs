@@ -5,6 +5,9 @@ extern crate gio;
 extern crate gtk;
 extern crate gdk;
 
+//use std::cell::RefCell;
+//use std::sync::RwLock;
+
 use gio::prelude::*;
 use gtk::prelude::*;
 use gdk::RGBA;
@@ -19,41 +22,152 @@ use imped_math::*;
 
 mod file;
 
+struct ParameterDescHistory(Vec<ParameterDesc>, usize);
+
+impl ParameterDescHistory {
+    fn append(&mut self, pd: ParameterDesc) {
+        self.0.truncate(self.1);
+        self.0.push(pd);
+        self.1 += 1;
+    }
+
+    fn back(&mut self) {
+        if self.1 > 0 {
+            self.1 -= 1;
+        }
+    }
+
+    fn forward(&mut self) {
+        if self.1 < self.0.len() {
+            self.1 += 1;
+        }
+    }
+
+    fn current<'a>(&'a mut self) -> &'a mut ParameterDesc {
+        &mut self.0[self.1]
+    }
+}
+
+struct ImpedimentData {
+    pub circs : Vec<(Circuit, String)>,  // Always at least 1
+    pub datasets : Vec<(Dataset, String)>,
+
+    // For each in 2D structure [Circuit][Data]:
+    pub params: Vec< Vec<ParameterDescHistory> >,
+
+    pub current_circuit: usize,
+    pub current_dataset: Option<usize>,
+}
+
+impl ImpedimentData {
+    fn current_datastruct<'a>(&'a mut self) -> (&'a mut Circuit, Option<&'a mut ParameterDesc>, Option<&'a mut Dataset> ) {
+        let circ = &mut self.circs[self.current_circuit].0;
+        let (ph, ds) = if let Some(ds) = self.current_dataset {
+            let ph = &mut self.params[self.current_circuit][ds];
+            let ds = &mut self.datasets[ds].0;
+            (Some(ph.current()), Some(ds))
+        }
+        else {
+            (None, None)
+        };
+
+        (circ, ph, ds)
+    }
+
+    fn current_circuit(&mut self) -> &mut Circuit {
+        &mut self.circs[self.current_circuit].0
+    }
+
+    fn current_dataset(&mut self) -> Option<&mut Dataset> {
+        Some(&mut self.datasets[self.current_dataset?].0)
+    }
+
+    fn add_dataset(&mut self, dataset: Dataset, name: String) {
+        self.datasets.push((dataset, name));
+        self.current_dataset = Some(self.datasets.len() - 1);
+    }
+
+    fn current_paramhistory(&mut self) -> Option<&mut ParameterDescHistory> {
+        Some(&mut self.params[self.current_circuit][self.current_dataset?])
+    }
+
+    fn current_paramlist(&mut self) -> Option<&mut ParameterDesc> {
+        if let Some(out) = self.current_paramhistory()
+            {Some(out.current())}
+        else
+            {None}
+    }
+
+    fn undo(&mut self){
+        if let Some(out) = self.current_paramhistory() {
+            Some(out.back());
+        }
+    }
+    fn redo(&mut self){
+        if let Some(out) = self.current_paramhistory() {
+            Some(out.forward());
+        }
+    }
+}
+
+pub type Dataset = Vec<DataPiece>;
+
+/*
+static g_data: std::sync::RwLock<ImpedimentData> = std::sync::RwLock::new(ImpedimentData {
+    circs : vec![(Circuit::Series(vec![
+        Circuit::Parallel(vec![
+            Circuit::Series(vec![
+                Circuit::Element(Element::Resistor),
+                Circuit::Element(Element::Warburg),
+            ]),
+            Circuit::Element(Element::Capacitor),
+        ]),
+        Circuit::Element(Element::Resistor),
+    ]), "Model1".to_string())],
+
+    datasets : vec![],
+
+    params: vec![vec![]],
+
+    current_circuit: 0,
+    current_dataset: 0,
+});*/
+
+/*
 #[allow(non_upper_case_globals)]
 static mut g_model : Option<Model> = None;
 
 #[allow(non_upper_case_globals)]
 static mut g_experimental : Option<Vec<DataPiece>> = None;
+*/
+
 
 #[allow(non_upper_case_globals)]
 const g_blocksize : f64 = 15.0;
 
 
 /// Paint the g_model on a given DrawingArea
-fn draw_main_circuit(widget: &gtk::DrawingArea, context: &cairo::Context){
+fn draw_main_circuit<'a>(widget: &gtk::DrawingArea, context: &cairo::Context){
+    let ida = unsafe{zg_data.as_mut().unwrap()};
+
     context.set_source_rgb(1.0, 1.0, 1.0);
     context.paint();
 
-    match unsafe{&g_model} {
-        Some(model) => {
-            context.set_source_rgb(0.0, 0.7, 0.4);
+    let circuit = ida.current_circuit();
 
-            let size = model.circ.painted_size();
+    context.set_source_rgb(0.0, 0.7, 0.4);
 
-            let winalloc = widget.get_allocation();
-            let widsize = (winalloc.width, winalloc.height);
+    let size = circuit.painted_size();
 
-            if true {
-                let blocksize: f64 = g_blocksize;
-                model.circ.paint(&context, blocksize, (
-                    (widsize.0 as f64-size.0 as f64 * blocksize)/2., 
-                    (widsize.1 as f64-size.1 as f64 * blocksize)/2.)
-                );
-            }
+    let winalloc = widget.get_allocation();
+    let widsize = (winalloc.width, winalloc.height);
 
-            context.stroke();
-        }
-        _ => {panic!();}
+    if true {
+        let blocksize: f64 = g_blocksize;
+                circuit.paint(&context, blocksize, (
+            (widsize.0 as f64-size.0 as f64 * blocksize)/2., 
+            (widsize.1 as f64-size.1 as f64 * blocksize)/2.)
+        );
     }
 
     context.stroke();
@@ -79,48 +193,74 @@ fn edit_value<T: std::str::FromStr>(val: &mut T, entry: &gtk::Entry, window: &gt
     window.queue_draw();
 }
 
+fn remake_param_list(ida: &mut ImpedimentData)
+{
+    let circ = ida.current_circuit();
+    let list = circ.paramlist();
+
+    let clist = ida.current_paramhistory();
+
+    if let Some(clist) = clist {
+        clist.append(ParameterDesc::new(&list));
+    }
+}
+
 /// Fill the parameter list with a current model's data
-fn recreate_param_list(parambox: &gtk::Box, window: &gtk::Window, renew_params: bool) {
+fn redraw_param_list(parambox: &gtk::Box, window: &gtk::Window) {
+
+    //let ida = unsafe{std::mem::transmute::<_, &'static RwLock<ImpedimentData>>(ida)};
+
     unsafe {
         // Remove all the previous editboxes
         for w in parambox.get_children() {
             parambox.remove(&w);
         }
 
-        let _model = g_model.as_mut().unwrap();
-        if renew_params {
-            _model.params = ParameterDesc::new(&(_model.circ).paramlist());
-        }
+        if let Some(params) = ida().current_paramlist() {
+            // Create the name label, the bounds editboxes and the value editboxes for each element
+            for i in 0..params.vals.len() {
+                let single_param = gtk::Box::new(gtk::Orientation::Horizontal, 5);
 
-        // Create the name label, the bounds editboxes and the value editboxes for each element
-        for i in 0.._model.params.vals.len() {
-            let single_param = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+                let lbl = gtk::Label::new(Some(&i.to_string()));
+                let ebounds_min = gtk::Entry::new();
+                let ebounds_max = gtk::Entry::new();
+                let evalue = gtk::Entry::new();
 
-            let lbl = gtk::Label::new(Some(&i.to_string()));
-            let ebounds_min = gtk::Entry::new();
-            let ebounds_max = gtk::Entry::new();
-            let evalue = gtk::Entry::new();
+                ebounds_min.set_text(&params.bounds[i].0.to_string());
+                ebounds_max.set_text(&params.bounds[i].1.to_string());
+                evalue.set_text(&params.vals[i].to_string());
 
-            ebounds_min.set_text(&_model.params.bounds[i].0.to_string());
-            ebounds_max.set_text(&_model.params.bounds[i].1.to_string());
-            evalue.set_text(&_model.params.vals[i].to_string());
+                ebounds_min.set_width_chars(6);
+                ebounds_max.set_width_chars(6);
 
-            ebounds_min.set_width_chars(6);
-            ebounds_max.set_width_chars(6);
+                single_param.pack_start(&lbl, /*expand*/false, /*fill*/false, /*padding*/0);
+                single_param.pack_start(&ebounds_min, /*expand*/true, /*fill*/true, /*padding*/0);
+                single_param.pack_start(&ebounds_max, /*expand*/true, /*fill*/true, /*padding*/0);
+                single_param.pack_start(&evalue, /*expand*/true, /*fill*/true, /*padding*/5);
 
-            single_param.pack_start(&lbl, /*expand*/false, /*fill*/false, /*padding*/0);
-            single_param.pack_start(&ebounds_min, /*expand*/true, /*fill*/true, /*padding*/0);
-            single_param.pack_start(&ebounds_max, /*expand*/true, /*fill*/true, /*padding*/0);
-            single_param.pack_start(&evalue, /*expand*/true, /*fill*/true, /*padding*/5);
+                let w1 = window.clone();
+                let w2 = window.clone();
+                let w3 = window.clone();
 
-            let w1 = window.clone();
-            let w2 = window.clone();
-            let w3 = window.clone();
-            ebounds_min.connect_changed(move |emin| {edit_value(&mut g_model.as_mut().unwrap().params.bounds[i].0, emin, &w1 )});
-            ebounds_max.connect_changed(move |emax| {edit_value(&mut g_model.as_mut().unwrap().params.bounds[i].1, emax, &w2 )});
-            evalue.connect_changed(move |ev| {edit_value(&mut g_model.as_mut().unwrap().params.vals[i], ev, &w3)});
+                ebounds_min.connect_changed(move |emin| {
+                    if let Some(pl) = &mut ida().current_paramlist() {
+                        edit_value( &mut pl.bounds[i].0, emin, &w1 )
+                    }
+                });
+                ebounds_max.connect_changed(move |emax| {
+                    if let Some(pl) = &mut ida().current_paramlist() {
+                        edit_value( &mut pl.bounds[i].1, emax, &w2 )
+                    }
+                });
+                evalue.connect_changed(move |ev| {
+                    if let Some(pl) = &mut ida().current_paramlist() {
+                        edit_value( &mut pl.vals[i], ev, &w3 )
+                    }
+                });
 
-            parambox.pack_start(&single_param, /*expand*/false, /*fill*/false, /*padding*/0);
+                parambox.pack_start(&single_param, /*expand*/false, /*fill*/false, /*padding*/0);
+            }
+
         }
 
         // Redraw the window
@@ -129,7 +269,7 @@ fn recreate_param_list(parambox: &gtk::Box, window: &gtk::Window, renew_params: 
 }
 
 /// Get the coordinates of drawing block given the coordinates of a point in a `gtk::DrawingArea`
-fn block_by_coords(model: &Model, wid: &gtk::DrawingArea, event: &gdk::EventButton) 
+fn block_by_coords(circuit: &Circuit, wid: &gtk::DrawingArea, event: &gdk::EventButton) 
     -> Option<(u16, u16)>
 {
     // The circuit is located at the center of the DrawingArea
@@ -139,7 +279,7 @@ fn block_by_coords(model: &Model, wid: &gtk::DrawingArea, event: &gdk::EventButt
     let (wx, wy) = (winalloc.width as f64, winalloc.height as f64);
 
     // Get the circuit size
-    let (i_sx, i_sy) = model.circ.painted_size();
+    let (i_sx, i_sy) = circuit.painted_size();
     let (sx,sy) = (i_sx as f64 * g_blocksize, i_sy as f64 * g_blocksize);
 
     // Get the cursor pos
@@ -191,7 +331,7 @@ fn build_element_selector(builder: &gtk::Builder) -> impl Fn() -> Circuit {
 /// Build a function that performs the circuit editing operation chosen by the user
 /// 
 /// [Replace, Remove, Add series or Add parallel?]
-fn build_circuit_editor(builder: &gtk::Builder) -> impl Fn(&mut Model, u16, u16) -> () {
+fn build_circuit_editor(builder: &gtk::Builder) -> impl Fn(&mut Circuit, u16, u16) -> () {
     let rb_edit_replace: gtk::RadioButton = builder.get_object("rb_edit_replace").unwrap();
     let rb_edit_series: gtk::RadioButton = builder.get_object("rb_edit_series").unwrap();
     let rb_edit_parallel: gtk::RadioButton = builder.get_object("rb_edit_parallel").unwrap();
@@ -199,26 +339,26 @@ fn build_circuit_editor(builder: &gtk::Builder) -> impl Fn(&mut Model, u16, u16)
 
     let create_user_element = build_element_selector(&builder);
     
-    let perform_user_edit = move |model: &mut Model, x, y| {
+    let perform_user_edit = move |circ: &mut Circuit, x, y| {
         if rb_edit_replace.get_active() {
-            if let Some(el) = model.circ.replace((x, y), create_user_element()) {
-                model.circ = el;
+            if let Some(el) = circ.replace((x, y), create_user_element()) {
+                *circ = el;
             };
         }
         else if rb_edit_series.get_active() {
-            if let Some(el) = model.circ.add_series((x, y), create_user_element()) {
-                model.circ = Circuit::Series(vec![model.circ.clone(), el]);
+            if let Some(el) = circ.add_series((x, y), create_user_element()) {
+                *circ = Circuit::Series(vec![circ.clone(), el]);
             }
         }
         else if rb_edit_parallel.get_active() {
-            if let Some(el) = model.circ.add_parallel((x, y), create_user_element()) {
-                model.circ = Circuit::Parallel(vec![model.circ.clone(), el]);
+            if let Some(el) = circ.add_parallel((x, y), create_user_element()) {
+                *circ = Circuit::Parallel(vec![circ.clone(), el]);
             }
         }
         else if rb_edit_remove.get_active() {
-            match model.circ.remove((x, y)) {
+            match circ.remove((x, y)) {
                 RemoveAction::DoNothing => {}
-                RemoveAction::ChangeTo(el) => {model.circ = el;}
+                RemoveAction::ChangeTo(el) => {*circ = el;}
                 RemoveAction::Remove => {}
             }
         }
@@ -231,23 +371,24 @@ fn build_circuit_editor(builder: &gtk::Builder) -> impl Fn(&mut Model, u16, u16)
 }
 
 /// Plot the experimental and theoretical data for a single DrawingArea
-fn draw_graph<T>(widget: &gtk::DrawingArea, context: &cairo::Context) -> Inhibit
+fn draw_graph<T>(ida: &mut ImpedimentData, widget: &gtk::DrawingArea, context: &cairo::Context) -> Inhibit
     where T: plotting::DataExtractor
 {
     let sz = widget.get_allocation();
 
-    context.set_source_rgb(1.0, 1.0, 1.0);
-    context.paint();
-    unsafe{
+    let (circ, paramlist, dataset) = ida.current_datastruct();
+
+    let dataset = match dataset{Some(x)=>Some(&x[..]), None=>None};
+
+    if let Some(params) = paramlist {
+        context.set_source_rgb(1.0, 1.0, 1.0);
+        context.paint();
         plotting::plot_model::<T>(
-            g_model.as_ref().unwrap(),
+            Model{circ, params},
             context,
-            V2{x: sz.width as f64, y: sz.height as f64}, 
+            V2{x: sz.width as f64, y: sz.height as f64},
             None,
-            match &g_experimental {
-                Some(ex) => {Some(&ex)} 
-                None => None
-            }
+            dataset
         );
     }
     Inhibit(false)
@@ -257,11 +398,11 @@ fn draw_graph<T>(widget: &gtk::DrawingArea, context: &cairo::Context) -> Inhibit
 /// 
 /// Compute the difference between the experimental data
 /// and model output, given a set of `params` to the model
-fn loss(params: &[f64], gradient_out: Option<&mut [f64]>) -> f64
+fn loss(circ: &Circuit, data: &Dataset, params: &[f64], gradient_out: Option<&mut [f64]>) -> f64
 {
     let mut gradient_out = gradient_out;
-    let circ = unsafe{&g_model.as_ref().unwrap().circ};
-    let _e = unsafe{ g_experimental.as_ref() };
+    //let circ = ida.current_circuit();
+    let exps = data;
 
     if let Some(gout) = &mut gradient_out {
         for i in 0..gout.len() {
@@ -269,27 +410,23 @@ fn loss(params: &[f64], gradient_out: Option<&mut [f64]>) -> f64
         }
     };
 
-    if let Some(exps) = _e { 
-        let mut loss = 0.0_f64;
-        for point in exps {
-            let model_imp = circ.impedance(point.omega, &params);
-            let diff = model_imp - point.imp;
-            loss += diff.norm_sqr() / point.imp.norm_sqr();
+    let mut loss = 0.0_f64;
+    for point in exps {
+        let model_imp = circ.impedance(point.omega, &params);
+        let diff = model_imp - point.imp;
+        loss += diff.norm_sqr() / point.imp.norm_sqr();
 
-            if let Some(gout) = &mut gradient_out {
-                for i in 0..gout.len() {
-                    let dmdx = circ._d_impedance(point.omega, &params, i);
-                    // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
-                    let ml = (point.imp-model_imp)*dmdx.conj().re * 2.0;
-                    //let ml = (point.imp-model_imp)*dmdx.conj() + (point.imp.conj()-model_imp.conj())*dmdx;
-                    gout[i] += -1.0 / point.imp.norm_sqr() * ml.re;
-                }
-            };
-        }
-
-        loss
+        if let Some(gout) = &mut gradient_out {
+            for i in 0..gout.len() {
+                let dmdx = circ._d_impedance(point.omega, &params, i);
+                // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
+                let ml = (point.imp-model_imp)*dmdx.conj().re * 2.0;
+                gout[i] += -1.0 / point.imp.norm_sqr() * ml.re;
+            }
+        };
     }
-    else {0.0}
+
+    loss
 }
 
 
@@ -317,22 +454,33 @@ fn user_filename<'a>(do_save: bool, title: &str, parent_window: &gtk::Window) ->
     None
 }
 
+static mut zg_data: Option<ImpedimentData> = None;
+
+fn ida()->&'static mut ImpedimentData {unsafe{zg_data.as_mut().unwrap()}}
 
 fn main() {
-    let circ = Circuit::Series(vec![
-        Circuit::Parallel(vec![
-            Circuit::Series(vec![
+    unsafe {
+        zg_data = Some(ImpedimentData {
+            circs : vec![(Circuit::Series(vec![
+                Circuit::Parallel(vec![
+                    Circuit::Series(vec![
+                        Circuit::Element(Element::Resistor),
+                        Circuit::Element(Element::Warburg),
+                    ]),
+                    Circuit::Element(Element::Capacitor),
+                ]),
                 Circuit::Element(Element::Resistor),
-                Circuit::Element(Element::Warburg),
-            ]),
-            Circuit::Element(Element::Capacitor),
-        ]),
-        Circuit::Element(Element::Resistor),
-    ]);
+            ]), "Model1".to_string())],
 
-    let params = ParameterDesc::new(&circ.paramlist());
+            datasets : vec![],
 
-    unsafe {g_model = Some(Model{circ, params});}
+            params: vec![vec![]],
+
+            current_circuit: 0,
+            current_dataset: None,
+        });
+    }
+
 
     let app = gtk::Application::new(Some("app.impediment"), Default::default()).expect("GTK failed");
 
@@ -353,16 +501,18 @@ fn main() {
         graph.add_events(gdk::EventMask::BUTTON_PRESS_MASK);
 
         let cpbox : gtk::Box = builder.get_object("boxParams").unwrap();
-        recreate_param_list(&cpbox, &main_window, true);
+        remake_param_list(ida());
+        redraw_param_list(&cpbox, &main_window);
 
         let main_window_bybutton = main_window.clone();
         let cpbox_bpress = cpbox.clone();
         graph.connect_button_press_event(move |wid, event: &gdk::EventButton| {
-            let model = unsafe{g_model.as_mut().unwrap()};
+            let block = block_by_coords(ida().current_circuit(), &wid, &event);
 
-            if let Some((x,y)) = block_by_coords(&model, &wid, &event) {
-                perform_user_edit(model, x,y);
-                recreate_param_list(&cpbox_bpress, &main_window_bybutton, true);
+            if let Some((x,y)) = block {
+                perform_user_edit(ida().current_circuit(), x,y);
+                remake_param_list(ida());
+                redraw_param_list(&cpbox_bpress, &main_window_bybutton);
                 main_window_bybutton.queue_draw();
             }
 
@@ -371,15 +521,15 @@ fn main() {
 
         builder.get_object::<gtk::DrawingArea>("graph1")
                 .unwrap()
-                .connect_draw(draw_graph::<plotting::BodePhaseExtractor>);
+                .connect_draw(|w,c|draw_graph::<plotting::BodePhaseExtractor>(ida(),w,c));
 
         builder.get_object::<gtk::DrawingArea>("graph2")
                 .unwrap()
-                .connect_draw(draw_graph::<plotting::BodeAmpExtractor>);
+                .connect_draw(|w,c|draw_graph::<plotting::BodeAmpExtractor>(ida(),w,c));
 
         builder.get_object::<gtk::DrawingArea>("graphR")
                 .unwrap()
-                .connect_draw(draw_graph::<plotting::NyquistExtractor>);
+                .connect_draw(|w,c|draw_graph::<plotting::NyquistExtractor>(ida(),w,c));
 
         let main_window_byfit = main_window.clone();
 
@@ -388,7 +538,7 @@ fn main() {
         cb_method.set_active(Some(0));
 
         let main_window_save = main_window.clone();
-        builder.get_object::<gtk::Button>("b_save_model")
+        /*builder.get_object::<gtk::Button>("b_save_model")
             .unwrap()
             .connect_clicked(move |_btn| {
                 match user_filename(true, "Save model", &main_window_save) {
@@ -399,6 +549,7 @@ fn main() {
                     None => {}
                 }
             });
+        */
 
         let main_window_open = main_window.clone();
         let builder_loadfile_ref = builder.clone();
@@ -408,7 +559,7 @@ fn main() {
                 match user_filename(false, "Open data file", &main_window_open) {
                     Some(filename) => {
                         match file::load_csv(&filename, &builder_loadfile_ref, &main_window_open) {
-                            Ok(data) => { unsafe{g_experimental = Some(data);} }
+                            Ok(data) => { ida().add_dataset(data, filename); }
                             Err(err) => { println!("{}", err);}
                         }
                     }
@@ -418,7 +569,7 @@ fn main() {
 
         let cpbox_openmodel = cpbox.clone();
         let main_window_openmodel = main_window.clone();
-        builder.get_object::<gtk::Button>("b_open_model")
+        /*builder.get_object::<gtk::Button>("b_open_model")
             .unwrap()
             .connect_clicked(move |_btn| {
                 match user_filename(false, "Open model", &main_window_openmodel) {
@@ -433,12 +584,12 @@ fn main() {
 
                 recreate_param_list(&cpbox_openmodel, &main_window_openmodel, false);
                 main_window_openmodel.queue_draw();
-            });
+            });*/
 
         builder.get_object::<gtk::Button>("bFit")
             .unwrap()
             .connect_clicked(move |_btn| {
-                let model = unsafe{g_model.as_mut().unwrap()};
+                //let model = unsafe{g_model.as_mut().unwrap()};
 
                 let algo = match cb_method.get_active() {
                     Some(algoindex)  => {
@@ -453,31 +604,35 @@ fn main() {
                     None => None
                 };
 
+                //let ida = ida();
 
-                if let Some(algo) = algo {
-                    let mut opt = nlopt::Nlopt::new(
-                        algo,
-                        model.params.vals.len(), 
-                        |x: &[f64], grad: Option<&mut [f64]>, _: &mut ()| loss(x, grad), 
-                        nlopt::Target::Minimize, 
-                        ());
+                let (circuit, paramlist,dataset) = ida().current_datastruct();
+                if let (Some(paramlist), Some(dataset)) = (paramlist, dataset) {
+                    if let Some(algo) = algo {
+                        let mut opt = nlopt::Nlopt::new(
+                            algo,
+                            paramlist.vals.len(), 
+                            |x: &[f64], grad: Option<&mut [f64]>, _: &mut ()| loss(circuit, dataset, x, grad), 
+                            nlopt::Target::Minimize, 
+                            ());
 
-                    opt.set_lower_bounds(&model.params.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
-                    opt.set_upper_bounds(&model.params.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
-                    opt.set_maxeval((-1_i32) as u32).unwrap();
-                    opt.set_maxtime(10.0).unwrap();
+                        opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
+                        opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
+                        opt.set_maxeval((-1_i32) as u32).unwrap();
+                        opt.set_maxtime(10.0).unwrap();
 
-                    opt.set_xtol_rel(1e-10).unwrap();
+                        opt.set_xtol_rel(1e-10).unwrap();
 
-                    let optresult = opt.optimize(&mut model.params.vals);
-                    println!("{:?}", optresult);
-                    println!("{:?}", loss(&model.params.vals, None));
+                        let optresult = opt.optimize(&mut paramlist.vals);
+                        println!("{:?}", optresult);
+                        println!("{:?}", loss(circuit, dataset, &paramlist.vals, None));
 
-                    recreate_param_list(&cpbox, &main_window_byfit, false);
-                    main_window_byfit.queue_draw();
-                }
-                else {
-                    println!("Optimization algorithm failed to be chosen")
+                        redraw_param_list(&cpbox, &main_window_byfit);
+                        main_window_byfit.queue_draw();
+                    }
+                    else {
+                        println!("Optimization algorithm failed to be chosen")
+                    }
                 }
             });
 

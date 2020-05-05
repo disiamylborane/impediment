@@ -185,14 +185,16 @@ impl<T> Iterator for DataIter<'_, T>
 
 /// Plot a spectrum of a model and experimental data points
 /// using `DataExtractor` as a helper
-pub fn plot_model<EXT: DataExtractor>(
-    model: &Model,
+pub fn plot_model<'a, EXT: DataExtractor>(
+    model: Model,
     ctx: &cairo::Context,
     area_size: V2,
     bounds: Option<Bounds>,
-    experimental : Option<&[DataPiece]>,
+    experimental : Option<&'a [DataPiece]>,
 )
 {
+    let m1 = Model{..model};
+    let m2 = Model{..model};
     let bounds = match bounds {
         Some(bounds) => bounds,
         None => {
@@ -201,7 +203,7 @@ pub fn plot_model<EXT: DataExtractor>(
                 None => {Box::new(geomspace(0.1, 10000.0, 100))}
             };
             let mut chbounds = Bounds{min: V2{x: std::f64::INFINITY, y:std::f64::INFINITY}, max: V2{x: std::f64::NEG_INFINITY, y:std::f64::NEG_INFINITY}};
-            let data = DataIter::<EXT>{stored: &mut ModelIter{model : &model, points: &mut points}, _d: std::marker::PhantomData{}};
+            let data = DataIter::<EXT>{stored: &mut ModelIter{model : m1, points: &mut points}, _d: std::marker::PhantomData{}};
             for d in data {
                 update_bounds(d,&mut chbounds);
             }
@@ -221,7 +223,7 @@ pub fn plot_model<EXT: DataExtractor>(
         Some(data) => {Box::new(data.iter().map(|x| x.omega))}
         None => {Box::new(geomspace(0.1, 10000.0, 100))}
     };
-    let mut miter = ModelIter{model : &model, points: &mut points};
+    let mut miter = ModelIter{model : m2, points: &mut points};
     let mut data = DataIter::<EXT>{stored: &mut miter, _d: std::marker::PhantomData{}};
 
 

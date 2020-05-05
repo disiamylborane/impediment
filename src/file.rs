@@ -309,7 +309,7 @@ fn split_params(mut s: String) -> Result<(f64,f64,f64), ()>
     
     Ok((val,min,max))
 }
-
+/*
 pub fn load_model(filename: &str, model: &mut imped_math::Model) -> Result<(), ()> {
     if let Ok(file) = std::fs::File::open(filename) {
         use std::io::BufRead;
@@ -344,3 +344,4 @@ pub fn load_model(filename: &str, model: &mut imped_math::Model) -> Result<(), (
 
 }
 
+*/
