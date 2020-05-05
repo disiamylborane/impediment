@@ -309,8 +309,9 @@ fn split_params(mut s: String) -> Result<(f64,f64,f64), ()>
     
     Ok((val,min,max))
 }
-/*
-pub fn load_model(filename: &str, model: &mut imped_math::Model) -> Result<(), ()> {
+
+
+pub fn load_model(filename: &str, circuit: &mut crate::circuit::Circuit, params: &mut imped_math::ParameterDesc) -> Result<(), ()> {
     if let Ok(file) = std::fs::File::open(filename) {
         use std::io::BufRead;
 
@@ -319,20 +320,20 @@ pub fn load_model(filename: &str, model: &mut imped_math::Model) -> Result<(), (
         if let Some(Ok(firstline)) = lines.next() {
             use std::str::FromStr;
             if let Ok(circ) = Circuit::from_str(&firstline) {
-                model.circ = circ;
+                *circuit = circ;
             }
             else {return Err(());}
         }
         else {return Err(());}
 
-        model.params.vals.clear();
-        model.params.bounds.clear();
+        params.vals.clear();
+        params.bounds.clear();
 
         for line in lines {
             if let Ok(par) = line {
                 let (val,min,max) = split_params(par)?;
-                model.params.vals.push(val);
-                model.params.bounds.push((min,max));
+                params.vals.push(val);
+                params.bounds.push((min,max));
             }
         }
 
@@ -343,5 +344,3 @@ pub fn load_model(filename: &str, model: &mut imped_math::Model) -> Result<(), (
     }
 
 }
-
-*/

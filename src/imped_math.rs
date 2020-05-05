@@ -2,6 +2,7 @@
 
 use crate::circuit::*;
 
+#[derive(Debug, Clone)]
 pub struct ParameterDesc {
     pub vals : Vec<f64>,
     pub bounds : Vec<(f64, f64)>

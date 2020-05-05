@@ -23,7 +23,7 @@ pub const INDUCTANCE: ParameterBase = ParameterBase {letter: 'L', limits: (0.0, 
 pub const CPE_Q:      ParameterBase = ParameterBase {letter: 'Q', limits: (0.0, std::f64::INFINITY), default:0.001};
 pub const CPE_N:      ParameterBase = ParameterBase {letter: 'n', limits: (0.0, 1.0), default:0.5};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Element {
     Resistor,
     Capacitor,
@@ -32,7 +32,7 @@ pub enum Element {
     CPE,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Circuit {
     Element(Element),
     Series(Vec<Circuit>),
