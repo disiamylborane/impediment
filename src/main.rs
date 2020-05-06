@@ -560,7 +560,10 @@ fn main() {
                 match user_filename(false, "Open data file", &main_window_open) {
                     Some(filename) => {
                         match file::load_csv(&filename, &builder_loadfile_ref, &main_window_open) {
-                            Ok(data) => { ida().add_dataset(data, filename); }
+                            Ok(data) => { 
+                                let pure_fname = std::path::Path::new(&filename).file_name().unwrap().to_str().unwrap();
+                                ida().add_dataset(data, pure_fname.to_string());
+                            }
                             Err(err) => { println!("{}", err);}
                         }
                         remake_dataset_combobox(ida(), &cb_datasets_loadfile);
