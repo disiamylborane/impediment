@@ -449,19 +449,19 @@ static mut G_DATA: Option<ImpedimentData> = None;
 fn ida()->&'static mut ImpedimentData {unsafe{G_DATA.as_mut().unwrap()}}
 
 fn main() {
-    unsafe {
-        let circuit = Circuit::Series(vec![
-                Circuit::Parallel(vec![
-                    Circuit::Series(vec![
-                        Circuit::Element(Element::Resistor),
-                        Circuit::Element(Element::Warburg),
-                    ]),
-                    Circuit::Element(Element::Capacitor),
+    let circuit = Circuit::Series(vec![
+            Circuit::Parallel(vec![
+                Circuit::Series(vec![
+                    Circuit::Element(Element::Resistor),
+                    Circuit::Element(Element::Warburg),
                 ]),
-                Circuit::Element(Element::Resistor),
-            ]);
-        let desc = ParameterDesc::new(&circuit.paramlist());
-        
+                Circuit::Element(Element::Capacitor),
+            ]),
+            Circuit::Element(Element::Resistor),
+        ]);
+    let desc = ParameterDesc::new(&circuit.paramlist());
+
+    unsafe {
         G_DATA = Some(ImpedimentData {
             circs : vec![(circuit, "Model1".to_string(), true)],
 
@@ -608,6 +608,43 @@ fn main() {
             redraw_param_list(&cpbox_cb_circuits, &main_window_cb_circuits);
             main_window_cb_circuits.queue_draw();
         });
+
+        let cb_circuits_rmcirc = cb_circuits.clone();
+        let main_window_b_rmcirc = main_window.clone();
+        builder.get_object::<gtk::Button>("b_delete_model")
+            .unwrap()
+            .connect_clicked(move |_btn| {
+                let ida = ida();
+
+                if ida.circs.len() > 1 {
+                    ida.circs.remove(ida.current_circuit);
+                    ida.params.remove(ida.current_circuit);
+                    ida.current_circuit = ida.current_circuit .min (ida.circs.len() - 1);
+
+                    remake_circuit_combobox(&ida, &cb_circuits_rmcirc);
+                    main_window_b_rmcirc.queue_draw();
+                }
+            });
+
+
+        let cb_datasets_rmds = cb_datasets.clone();
+        let main_window_b_rmds = main_window.clone();
+        builder.get_object::<gtk::Button>("b_delete_dataset")
+            .unwrap()
+            .connect_clicked(move |_btn| {
+                let ida = ida();
+
+                if ida.datasets.len() > 1 {
+                    ida.datasets.remove(ida.current_dataset);
+                    for p in ida.params.iter_mut() {
+                        p.remove(ida.current_dataset);
+                    }
+                    ida.current_dataset = ida.current_dataset .min (ida.datasets.len() - 1);
+
+                    remake_dataset_combobox(&ida, &cb_datasets_rmds);
+                    main_window_b_rmds.queue_draw();
+                }
+            });
 
         /*let cpbox_openmodel = cpbox.clone();
         let main_window_openmodel = main_window.clone();
