@@ -3,6 +3,7 @@ use crate::imped_math;
 extern crate csv;
 
 use gtk::prelude::*;
+use crate::PF;
 
 struct FileLoadingError;
 impl std::fmt::Display for FileLoadingError {
@@ -123,7 +124,12 @@ pub fn load_csv(filename: &str, builder: &gtk::Builder, mainwindow: &gtk::Window
                     }.parse::<f64>();
 
                     if let (Ok(fval),Ok(ival1),Ok(ival2)) = (fval,ival1,ival2) {
-                        s_out += &format!("{} {}: {} + {}i {}\n", fval, params.freq_type, ival1, ival2, params.imp_type);
+                        s_out += & if ival2 >= 0.0 {
+                            format!("{:5.7} {}: {:5.7} + {:5.7}i {}\n", PF(fval), params.freq_type, PF(ival1), PF(ival2), params.imp_type)
+                        }
+                        else {
+                            format!("{:5.7} {}: {:5.7} - {:5.7}i {}\n", PF(fval), params.freq_type, PF(ival1), PF(-ival2), params.imp_type)
+                        };
                     }
                     else {
                         return override_color();

@@ -7,6 +7,10 @@ extern crate gio;
 extern crate gtk;
 extern crate gdk;
 
+extern crate float_pretty_print;
+
+use float_pretty_print::PrettyPrintFloat as PF;
+
 use gio::prelude::*;
 use gtk::prelude::*;
 use gdk::RGBA;
