@@ -152,20 +152,22 @@ fn draw_main_circuit<'a>(widget: &gtk::DrawingArea, context: &cairo::Context){
     context.stroke();
 }
 
-fn remake_circuit_combobox(ida:  &ImpedimentData, cb: &gtk::ComboBoxText) {
-    cb.remove_all();
+fn remake_circuit_combobox(ida:  &ImpedimentData, cb: &gtk::ComboBox, ls: &gtk::ListStore) {
+    ls.clear();
 
     for v in ida.circs.iter() {
-        cb.append_text(&v.1);
+        let iter = ls.append();
+        ls.set(&iter, &[0], &[&v.1]);
     }
     cb.set_active(Some(ida.current_circuit as u32));
 }
 
-fn remake_dataset_combobox(ida: &ImpedimentData, cb: &gtk::ComboBoxText) {
-    cb.remove_all();
+fn remake_dataset_combobox(ida: &ImpedimentData, cb: &gtk::ComboBox, ls: &gtk::ListStore) {
+    ls.clear();
 
     for v in ida.datasets.iter() {
-        cb.append_text(&v.1);
+        let iter = ls.append();
+        ls.set(&iter, &[0], &[&v.1]);
     }
     cb.set_active(Some(ida.current_dataset as u32));
 }
@@ -467,7 +469,7 @@ fn main() {
 
     unsafe {
         G_DATA = Some(ImpedimentData {
-            circs : vec![(circuit, "Model1".to_string(), true)],
+            circs : vec![(circuit, "Default".to_string(), true)],
 
             datasets : vec![(vec![], "Empty".to_string())],
 
@@ -487,11 +489,20 @@ fn main() {
         let main_window: gtk::Window = builder.get_object("main_window").unwrap();
         main_window.set_application(Some(app));
 
-        let cb_datasets = builder.get_object::<gtk::ComboBoxText>("cb_datasets").unwrap();
-        let cb_circuits = builder.get_object::<gtk::ComboBoxText>("cb_circuits").unwrap();
+        let cb_datasets = builder.get_object::<gtk::ComboBox>("cb_datasets").unwrap();
+        let cb_circuits = builder.get_object::<gtk::ComboBox>("cb_circuits").unwrap();
 
-        remake_circuit_combobox(ida(), &cb_circuits);
-        remake_dataset_combobox(ida(), &cb_datasets);
+        let ed_circuits: gtk::Entry = cb_circuits.get_child().unwrap().downcast().unwrap();
+        let ed_datasets: gtk::Entry = cb_datasets.get_child().unwrap().downcast().unwrap();
+
+        let list_circuits = builder.get_object::<gtk::ListStore>("list_circuits").unwrap();
+        let list_datasets = builder.get_object::<gtk::ListStore>("list_datasets").unwrap();
+
+        remake_circuit_combobox(ida(), &cb_circuits, &list_circuits);
+        remake_dataset_combobox(ida(), &cb_datasets, &list_datasets);
+
+        cb_circuits.set_active(Some(0));
+        cb_datasets.set_active(Some(0));
 
         let perform_user_edit = build_circuit_editor(&builder);
 
@@ -558,6 +569,7 @@ fn main() {
         let main_window_open = main_window.clone();
         let builder_loadfile_ref = builder.clone();
         let cb_datasets_loadfile = cb_datasets.clone();
+        let list_datasets_loadfile = list_datasets.clone();
         builder.get_object::<gtk::Button>("b_open_data")
             .unwrap()
             .connect_clicked(move |_btn| {
@@ -570,7 +582,7 @@ fn main() {
                             }
                             Err(err) => { println!("{}", err);}
                         }
-                        remake_dataset_combobox(ida(), &cb_datasets_loadfile);
+                        remake_dataset_combobox(ida(), &cb_datasets_loadfile, &list_datasets_loadfile);
                     }
                     None => {}                    
                 }
@@ -578,6 +590,7 @@ fn main() {
 
         let main_window_b_addcirc = main_window.clone();
         let cb_circuits_addcirc = cb_circuits.clone();
+        let list_circuits_addcirc = list_circuits.clone();
         builder.get_object::<gtk::Button>("b_add_model")
             .unwrap()
             .connect_clicked(move |_btn| {
@@ -590,9 +603,32 @@ fn main() {
                 ida.params.push(vec![vparams; ida.datasets.len()]);
                 ida.current_circuit = ida.circs.len() - 1;
 
-                remake_circuit_combobox(&ida, &cb_circuits_addcirc);
+                remake_circuit_combobox(&ida, &cb_circuits_addcirc, &list_circuits_addcirc);
                 main_window_b_addcirc.queue_draw();
             });
+
+
+        let list_datasets_ed_datasets = list_datasets.clone();
+        ed_datasets.connect_key_press_event(move |entry, key| {
+            if key.get_keyval() == gdk::enums::key::Return {
+                let ida = ida();
+
+                ida.datasets[ida.current_dataset].1 = entry.get_text().unwrap().as_str().to_string();
+
+                list_datasets_ed_datasets.clear();
+
+                for v in ida.datasets.iter() {
+                    let iter = list_datasets_ed_datasets.append();
+                    list_datasets_ed_datasets.set(&iter, &[0], &[&v.1]);
+                }
+            }
+            else if key.get_keyval() == gdk::enums::key::Escape {
+                let ida = ida();
+                entry.set_text(&ida.datasets[ida.current_dataset].1);
+            }
+
+            Inhibit(false)
+        });
         
         let main_window_cb_datasets = main_window.clone();
         let cpbox_cb_datasets = cpbox.clone();
@@ -603,6 +639,29 @@ fn main() {
             }
             redraw_param_list(&cpbox_cb_datasets, &main_window_cb_datasets);
             main_window_cb_datasets.queue_draw();
+        });
+
+        let list_circuits_ed_circuits = list_circuits.clone();
+        ed_circuits.connect_key_press_event(move |entry, key| {
+            if key.get_keyval() == gdk::enums::key::Return {
+
+                let ida = ida();
+
+                ida.circs[ida.current_circuit].1 = entry.get_text().unwrap().as_str().to_string();
+
+                    list_circuits_ed_circuits.clear();
+
+                    for v in ida.circs.iter() {
+                        let iter = list_circuits_ed_circuits.append();
+                        list_circuits_ed_circuits.set(&iter, &[0], &[&v.1]);
+                    }
+            }
+            else if key.get_keyval() == gdk::enums::key::Escape {
+                let ida = ida();
+                entry.set_text(&ida.circs[ida.current_circuit].1);
+            }
+
+            Inhibit(false)
         });
 
         let main_window_cb_circuits = main_window.clone();
@@ -618,6 +677,7 @@ fn main() {
 
         let cb_circuits_rmcirc = cb_circuits.clone();
         let main_window_b_rmcirc = main_window.clone();
+        let list_circuits_rmcirc = list_circuits.clone();
         builder.get_object::<gtk::Button>("b_delete_model")
             .unwrap()
             .connect_clicked(move |_btn| {
@@ -628,7 +688,7 @@ fn main() {
                     ida.params.remove(ida.current_circuit);
                     ida.current_circuit = ida.current_circuit .min (ida.circs.len() - 1);
 
-                    remake_circuit_combobox(&ida, &cb_circuits_rmcirc);
+                    remake_circuit_combobox(&ida, &cb_circuits_rmcirc, &list_circuits_rmcirc);
                     main_window_b_rmcirc.queue_draw();
                 }
             });
@@ -636,6 +696,7 @@ fn main() {
 
         let cb_datasets_rmds = cb_datasets.clone();
         let main_window_b_rmds = main_window.clone();
+        let list_datasets_rmds = list_datasets.clone();
         builder.get_object::<gtk::Button>("b_delete_dataset")
             .unwrap()
             .connect_clicked(move |_btn| {
@@ -648,7 +709,7 @@ fn main() {
                     }
                     ida.current_dataset = ida.current_dataset .min (ida.datasets.len() - 1);
 
-                    remake_dataset_combobox(&ida, &cb_datasets_rmds);
+                    remake_dataset_combobox(&ida, &cb_datasets_rmds, &list_datasets_rmds);
                     main_window_b_rmds.queue_draw();
                 }
             });

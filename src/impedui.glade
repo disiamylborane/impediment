@@ -351,6 +351,28 @@
       <action-widget response="-5">b_o</action-widget>
     </action-widgets>
   </object>
+  <object class="GtkListStore" id="list_circuits">
+    <columns>
+      <!-- column-name circ -->
+      <column type="gchararray"/>
+    </columns>
+    <data>
+      <row>
+        <col id="0" translatable="yes">Model1</col>
+      </row>
+    </data>
+  </object>
+  <object class="GtkListStore" id="list_datasets">
+    <columns>
+      <!-- column-name ds -->
+      <column type="gchararray"/>
+    </columns>
+    <data>
+      <row>
+        <col id="0" translatable="yes">Empty</col>
+      </row>
+    </data>
+  </object>
   <object class="GtkListStore" id="listmeth">
     <columns>
       <!-- column-name meth -->
@@ -373,6 +395,7 @@
   </object>
   <object class="GtkWindow" id="main_window">
     <property name="can_focus">False</property>
+    <property name="gravity">center</property>
     <child>
       <placeholder/>
     </child>
@@ -475,17 +498,23 @@
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
                     <child>
-                      <object class="GtkComboBoxText" id="cb_circuits">
+                      <object class="GtkComboBox" id="cb_circuits">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
-                        <items>
-                          <item translatable="yes">Model1</item>
-                        </items>
+                        <property name="model">list_circuits</property>
+                        <property name="has_entry">True</property>
+                        <property name="entry_text_column">0</property>
+                        <child internal-child="entry">
+                          <object class="GtkEntry">
+                            <property name="can_focus">True</property>
+                            <property name="text" translatable="yes">Model1</property>
+                          </object>
+                        </child>
                       </object>
                       <packing>
                         <property name="expand">True</property>
                         <property name="fill">True</property>
-                        <property name="position">2</property>
+                        <property name="position">0</property>
                       </packing>
                     </child>
                   </object>
@@ -590,14 +619,22 @@
                     <property name="visible">True</property>
                     <property name="can_focus">False</property>
                     <child>
-                      <object class="GtkComboBoxText" id="cb_datasets">
+                      <object class="GtkComboBox" id="cb_datasets">
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
+                        <property name="model">list_datasets</property>
+                        <property name="has_entry">True</property>
+                        <property name="entry_text_column">0</property>
+                        <child internal-child="entry">
+                          <object class="GtkEntry">
+                            <property name="can_focus">True</property>
+                          </object>
+                        </child>
                       </object>
                       <packing>
                         <property name="expand">True</property>
                         <property name="fill">True</property>
-                        <property name="position">2</property>
+                        <property name="position">0</property>
                       </packing>
                     </child>
                   </object>
@@ -905,7 +942,6 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="model">listmeth</property>
-                        <property name="has_frame">False</property>
                         <property name="has_entry">True</property>
                         <property name="entry_text_column">0</property>
                         <child internal-child="entry">
