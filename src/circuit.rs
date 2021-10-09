@@ -1,35 +1,109 @@
 
 extern crate num;
-extern crate cairo;
+use std::{f64::consts::PI, vec};
+use eframe::egui::{Color32, Pos2, Rect, Stroke, pos2, vec2};
 
-pub type Cplx = num::complex::Complex<f64>;
+use crate::{Cplx, ParameterDesc, ParameterEditability};
 
-use std::f64::consts::PI;
 const I: Cplx = Cplx{ re: 0.0, im: 1.0 };
 
-/// A helper structure representing a parameter type of circuit elements
-#[derive(Clone)]
-pub struct ParameterBase {
-    pub letter : char,
-    pub limits : (f64, f64),
-    pub default : f64,
-}
-
-
-pub const RESISTANCE: ParameterBase = ParameterBase {letter: 'R', limits: (0.0, std::f64::INFINITY), default:100.0};
-pub const CAPACITY:   ParameterBase = ParameterBase {letter: 'C', limits: (0.0, std::f64::INFINITY), default:0.001};
-pub const WARBURG_A:  ParameterBase = ParameterBase {letter: 'A', limits: (0.0, std::f64::INFINITY), default:1000.0};
-pub const INDUCTANCE: ParameterBase = ParameterBase {letter: 'L', limits: (0.0, std::f64::INFINITY), default:0.001};
-pub const CPE_Q:      ParameterBase = ParameterBase {letter: 'Q', limits: (0.0, std::f64::INFINITY), default:0.001};
-pub const CPE_N:      ParameterBase = ParameterBase {letter: 'n', limits: (0.0, 1.0), default:0.5};
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Element {
     Resistor,
     Capacitor,
     Inductor,
     Warburg,
-    CPE,
+    Cpe,
+}
+
+impl Element {
+    fn exchange_param<'a>(self, element: Self, idx: usize, paramlist: impl Iterator<Item = &'a mut ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+        for pdesc in paramlist {
+            match self {
+                Element::Resistor => {pdesc.remove(idx);},
+                Element::Capacitor => {pdesc.remove(idx);},
+                Element::Inductor => {pdesc.remove(idx);},
+                Element::Warburg => {pdesc.remove(idx);},
+                Element::Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
+            }
+            match element {
+                Element::Resistor => {pdesc.insert(idx, (100., (1., 100000.)))},
+                Element::Capacitor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
+                Element::Inductor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
+                Element::Warburg => {pdesc.insert(idx, (10., (1., 100000.)))},
+                Element::Cpe => {
+                    pdesc.insert(idx, (0.8, (0.01, 0.99)));
+                    pdesc.insert(idx, (0.000001, (0.000000001, 0.1)));
+                },
+            }
+        }
+        match self {
+            Element::Resistor => editability.remove(idx),
+            Element::Capacitor => editability.remove(idx),
+            Element::Inductor => editability.remove(idx),
+            Element::Warburg => editability.remove(idx),
+            Element::Cpe => {
+                editability.remove(idx);
+                editability.remove(idx)
+            }
+        };
+        match element {
+            Element::Resistor => editability.insert(idx, ParameterEditability::Plural),
+            Element::Capacitor => editability.insert(idx, ParameterEditability::Plural),
+            Element::Inductor => editability.insert(idx, ParameterEditability::Plural),
+            Element::Warburg => editability.insert(idx, ParameterEditability::Plural),
+            Element::Cpe => {
+                editability.insert(idx, ParameterEditability::Plural);
+                editability.insert(idx, ParameterEditability::Plural);
+            }
+        }
+    }
+    fn remove_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+        for pdesc in paramlist {
+                match self {
+                Element::Resistor => {pdesc.remove(idx);},
+                Element::Capacitor => {pdesc.remove(idx);},
+                Element::Inductor => {pdesc.remove(idx);},
+                Element::Warburg => {pdesc.remove(idx);},
+                Element::Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
+            }
+        }
+        match self {
+            Element::Resistor => editability.remove(idx),
+            Element::Capacitor => editability.remove(idx),
+            Element::Inductor => editability.remove(idx),
+            Element::Warburg => editability.remove(idx),
+            Element::Cpe => {
+                editability.remove(idx);
+                editability.remove(idx)
+            }
+        };
+    }
+    fn insert_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+        for pdesc in paramlist {
+            match self {
+                Element::Resistor => {pdesc.insert(idx, (100., (1., 100000.)))},
+                Element::Capacitor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
+                Element::Inductor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
+                Element::Warburg => {pdesc.insert(idx, (10., (1., 100000.)))},
+                Element::Cpe => {
+                    pdesc.insert(idx, (0.8, (0.01, 0.99)));
+                    pdesc.insert(idx, (0.000001, (0.000000001, 0.1)));
+                },
+            }
+        }
+
+        match self {
+            Element::Resistor => editability.insert(idx, ParameterEditability::Plural),
+            Element::Capacitor => editability.insert(idx, ParameterEditability::Plural),
+            Element::Inductor => editability.insert(idx, ParameterEditability::Plural),
+            Element::Warburg => editability.insert(idx, ParameterEditability::Plural),
+            Element::Cpe => {
+                editability.insert(idx, ParameterEditability::Plural);
+                editability.insert(idx, ParameterEditability::Plural);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -97,225 +171,57 @@ fn parallel_index_by_block(parallel: &[Circuit], block: (u16, u16)) -> ParallelB
 
 
 /// Paint a sign under the element
-fn sign_element(ctx: &cairo::Context, text: &str, pos: (f64, f64), blocksize: f64) {
-    ctx.move_to(pos.0 + blocksize*3./4., pos.1 + blocksize*3./2.);
-    ctx.set_font_size(blocksize*3./4.);
-    ctx.show_text(text);
+fn sign_element(ctx: &eframe::egui::Painter, text: &str, pos: Pos2, blocksize: f32) {
+    ctx.text(pos+vec2(blocksize, blocksize*3./2.), eframe::egui::Align2::CENTER_CENTER, text, eframe::egui::TextStyle::Body, Color32::WHITE);
 }
 
-
-pub enum RemoveAction {
-    DoNothing,
-    Remove,
-    ChangeTo(Circuit),
-}
-/*
-fn strslice_to_subcircuits(s: &str) -> Result<Circuit, ()> {
-    let buffer : Vec<Circuit> = vec![];
-    for c in s.chars() {
-        match c {
-            'R' => {buffer.push(Circuit::Element(Element::Resistor));}
-            'C' => {buffer.push(Circuit::Element(Element::Capacitor));}
-            'L' => {buffer.push(Circuit::Element(Element::Inductor));}
-            'W' => {buffer.push(Circuit::Element(Element::Warburg));}
-            'Q' => {buffer.push(Circuit::Element(Element::CPE));}
-        }
-    }
-}
-
-enum CircuitParseElement {Series, Parallel}
-*/
-enum CircuitParseElement {Circ(Circuit), Series, Parallel}
-
-impl std::str::FromStr for Circuit {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut stack : Vec<CircuitParseElement> = vec![];
-
-        for c in s.chars() {
-            match c {
-                'R' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Resistor)));}
-                'C' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Capacitor)));}
-                'L' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Inductor)));}
-                'W' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::Warburg)));}
-                'Q' => {stack.push(CircuitParseElement::Circ(Circuit::Element(Element::CPE)));}
-                '[' => {stack.push(CircuitParseElement::Series);}
-                '{' => {stack.push(CircuitParseElement::Parallel);}
-
-                ']' => {
-                    let mut elements : Vec<Circuit> = vec![];
-
-                    while let Some(v) = stack.pop() {
-                        match v {
-                            CircuitParseElement::Circ(c) => {elements.insert(0, c);}
-                            CircuitParseElement::Series => {break;}
-                            CircuitParseElement::Parallel => {return Err(());}
-                        }
-                    }
-
-                    stack.push(CircuitParseElement::Circ(Circuit::Series(elements)));
-                }
-
-                '}' => {
-                    let mut elements : Vec<Circuit> = vec![];
-
-                    while let Some(v) = stack.pop() {
-                        match v {
-                            CircuitParseElement::Circ(c) => {elements.insert(0, c);}
-                            CircuitParseElement::Series => {return Err(());}
-                            CircuitParseElement::Parallel => {break;}
-                        }
-                    }
-
-                    stack.push(CircuitParseElement::Circ(Circuit::Parallel(elements)));
-                }
-
-                _ => {return Err(())}
-            }
-        }
-
-        if stack.len() == 1 {
-            if let Some(CircuitParseElement::Circ(ret)) = stack.pop() {
-                return Ok(ret);
-            }
-        }
-        Err(())
-    }
-}
-
-impl std::fmt::Display for Circuit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Circuit::Element(Element::Resistor) => write!(f, "R"),
-            Circuit::Element(Element::Capacitor) => write!(f, "C"),
-            Circuit::Element(Element::Inductor) => write!(f, "L"),
-            Circuit::Element(Element::Warburg) => write!(f, "W"),
-            Circuit::Element(Element::CPE) => write!(f, "Q"),
-            Circuit::Series(elems) => {
-                write!(f, "[")?;
-                for e in elems { e.fmt(f)?; }
-                write!(f, "]")
-            }
-            Circuit::Parallel(elems) => {
-                write!(f, "{{")?;
-                for e in elems { e.fmt(f)?; }
-                write!(f, "}}")
-            }
-        }
-    }
-}
 
 impl Circuit {
-    pub fn paramlist(&self) -> Vec<ParameterBase>{
+    pub fn generate_new_params(&self) -> ParameterDesc {
         match self {
-            Circuit::Element(Element::Resistor) => vec![RESISTANCE],
-            Circuit::Element(Element::Capacitor) => vec![CAPACITY],
-            Circuit::Element(Element::Inductor) => vec![INDUCTANCE],
-            Circuit::Element(Element::Warburg) => vec![WARBURG_A],
-            Circuit::Element(Element::CPE) => vec![CPE_Q, CPE_N],
-            Circuit::Series(elems) => elems.iter().map(|x| x.paramlist()).fold(vec![], |mut a, b| {a.extend(b); a}),
-            Circuit::Parallel(elems) => elems.iter().map(|x| x.paramlist()).fold(vec![], |mut a, b| {a.extend(b); a}),
+            Circuit::Element(element) => {
+                let pd = match element {
+                    Element::Resistor => {(100., (1., 100000.))},
+                    Element::Capacitor => {(0.000001, (0.000000001, 0.1))},
+                    Element::Inductor => {(0.000001, (0.000000001, 0.1))},
+                    Element::Warburg => {(10., (1., 100000.))},
+                    Element::Cpe => {
+                        return ParameterDesc{ vals: vec![0.8, 1e-6], bounds: vec![(0.01, 0.99), (0.000000001, 0.1)] };
+                    },
+                };
+                ParameterDesc{ vals: vec![pd.0], bounds: vec![pd.1] }
+            }
+            Circuit::Series(s)|Circuit::Parallel(s) => {
+                let mut evals = vec![];
+                let mut ebounds = vec![];
+                for ParameterDesc{mut vals, mut bounds} in s.iter().map(|x| x.generate_new_params()) {
+                    evals.append(&mut vals);
+                    ebounds.append(&mut bounds);
+                }
+                ParameterDesc{vals: evals, bounds: ebounds}
+            },
         }
     }
 
-    fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx{
-        match self {
-            Circuit::Element(Element::Resistor) => Cplx::new(params[0], 0.0),
-
-            Circuit::Element(Element::Capacitor) => 1.0 / (I * omega * params[0]),
-
-            Circuit::Element(Element::Inductor) => I * omega * params[0],
-
-            Circuit::Element(Element::Warburg) => (1.0 - I) * params[0] / omega.sqrt(),
-
-            Circuit::Element(Element::CPE) => {
-                let q = params[0];
-                let n = params[1];
-                let numer = (-I*PI/2.0*n).exp();
-                let denom = q * omega.powf(n);
-                numer/denom
-            }
-
-            Circuit::Series(elems) => {
-                let mut cval = 0;
-                let mut imped = Cplx::new(0.0, 0.0);
-                for c in elems.iter() {
-                    let cend = cval + c.paramlist().len();
-                    let slc = &params[cval..cend];
-                    let ipd = c.impedance(omega, slc);
-                    imped += ipd;
-                    cval = cend;
-                }
-                return imped;
-            }
-
-            Circuit::Parallel(elems) => {
-                let mut cval = 0;
-                let mut admit = Cplx::new(0.0, 0.0);
-                for c in elems.iter() {
-                    let cend = cval + c.paramlist().len();
-                    let slc = &params[cval..cend];
-                    let ipd = c.impedance(omega, slc);
-                    admit += 1.0/ipd;
-                    cval = cend;
-                }
-                return 1.0/admit;
-            }
-        }
+    pub fn param_names(&self) -> Vec<String> {
+        self.param_names_rec(0).0
     }
 
-    pub fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
-        if dparam >= self.paramlist().len() {
-            //panic!("Gradient requested for {} parameter of {}", dparam, self)
-            panic!()
-        }
+    pub fn param_names_rec(&self, mut start_index: usize) -> (Vec<String>, usize) {
         match self {
-            Circuit::Element(Element::Resistor) => Cplx::new(1.0, 0.0),
-
-            Circuit::Element(Element::Capacitor) => I / (omega * params[0].powi(2)),
-
-            Circuit::Element(Element::Inductor) => I * omega,
-
-            Circuit::Element(Element::Warburg) => ((1.0 - I)*params[0])/(omega.sqrt()),
-
-            Circuit::Element(Element::CPE) => {
-                let q = params[0];
-                let n = params[1];
-                let numer = (-I*PI/2.0*n).exp();
-                let denom = q * omega.powf(n);
-                match dparam {
-                    0 => {-numer/denom/q}
-                    1 => {-(omega.ln() + I*PI/2.0)*numer/denom}
-                    _ => unreachable!()
+            Circuit::Element(Element::Resistor) => (vec![format!("R{}", start_index)], start_index+1),
+            Circuit::Element(Element::Capacitor) => (vec![format!("C{}", start_index)], start_index+1),
+            Circuit::Element(Element::Inductor) => (vec![format!("L{}", start_index)], start_index+1),
+            Circuit::Element(Element::Warburg) => (vec![format!("W{}", start_index)], start_index+1),
+            Circuit::Element(Element::Cpe) => (vec![format!("Q{}", start_index), format!("n{}", start_index)], start_index+1),
+            Circuit::Series(elems)|Circuit::Parallel(elems) => {
+                let mut out = vec![];
+                for e in elems {
+                    let ps = e.param_names_rec(start_index);
+                    out.extend(ps.0);
+                    start_index = ps.1;
                 }
-            }
-
-            Circuit::Series(elems) => {
-                let mut cval = 0;
-                for c in elems.iter() {
-                    let cend = cval + c.paramlist().len();
-                    let slc = &params[cval..cend];
-                    if cval <= dparam && dparam<cend {
-                        return c._d_impedance(omega, slc, dparam-cval);
-                    }
-                    cval = cend;
-                }
-                unreachable!()
-            }
-
-            Circuit::Parallel(elems) => {
-                let mut cval = 0;
-                for c in elems.iter() {
-                    let cend = cval + c.paramlist().len();
-                    let slc = &params[cval..cend];
-                    if cval <= dparam && dparam<cend {
-                        let denommed = self._impedance(omega, params);
-                        return denommed.powi(2) / c.impedance(omega, slc).powi(2) * c._d_impedance(omega, slc, dparam-cval);
-                    }
-                    cval = cend;
-                }
-                unreachable!()
+                (out, start_index)
             }
         }
     }
@@ -338,294 +244,409 @@ impl Circuit {
         }
     }
 
-    pub fn paint(&self, ctx: &cairo::Context, blocksize: f64, pos: (f64,f64)) {
+    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize)->usize {
+        let stroke = Stroke::new(1., Color32::WHITE);
         match self {
             Circuit::Element(Element::Resistor) => {
-                ctx.move_to(pos.0, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
-
-                ctx.rectangle(pos.0 + blocksize/4., pos.1 + blocksize/4., blocksize*3./2., blocksize/2.);
-
-                ctx.move_to(pos.0 + blocksize*7./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
-
-                sign_element(ctx, &"R", pos, blocksize);
+                painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize/4., blocksize/2.)], stroke);
+                painter.rect_stroke(Rect::from_min_size(pos+vec2(blocksize/4., blocksize/4.), vec2(blocksize*3./2., blocksize/2.)), 0., stroke);
+                painter.line_segment([pos+vec2(blocksize*7./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
+                sign_element(painter, &format!("R{}", start_index), pos, blocksize);
+                start_index+1
             }
-            
             Circuit::Element(Element::Capacitor) => {
-                ctx.move_to(pos.0, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*3./4., pos.1 + blocksize/2.);
-
-                ctx.move_to(pos.0 + blocksize*3./4., pos.1);
-                ctx.line_to(pos.0 + blocksize*3./4., pos.1 + blocksize);
-                ctx.move_to(pos.0 + blocksize*5./4., pos.1);
-                ctx.line_to(pos.0 + blocksize*5./4., pos.1 + blocksize);
-
-                ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
-
-                sign_element(ctx, &"C", pos, blocksize);
+                painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize*3./4., blocksize/2.)], stroke);
+                painter.line_segment([pos+vec2(blocksize*3./4., 0.), pos+vec2(blocksize*3./4., blocksize)], stroke);
+                painter.line_segment([pos+vec2(blocksize*5./4., 0.), pos+vec2(blocksize*5./4., blocksize)], stroke);
+                painter.line_segment([pos+vec2(blocksize*5./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
+                sign_element(painter, &format!("C{}", start_index), pos, blocksize);
+                start_index+1
             },
-
             Circuit::Element(Element::Inductor) => {
-                ctx.move_to(pos.0, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize/4., pos.1 + blocksize/2.);
+                let mut spos = vec2(0., blocksize/2.);
 
-                ctx.curve_to(pos.0 + blocksize*5./12., pos.1,
-                            pos.0 + blocksize*7./12., pos.1,
-                            pos.0 + blocksize*9./12., pos.1 + blocksize/2.);
-                ctx.curve_to(pos.0 + blocksize*11./12., pos.1,
-                            pos.0 + blocksize*13./12., pos.1,
-                            pos.0 + blocksize*15./12., pos.1 + blocksize/2.);
-                ctx.curve_to(pos.0 + blocksize*17./12., pos.1,
-                            pos.0 + blocksize*19./12., pos.1,
-                            pos.0 + blocksize*21./12., pos.1 + blocksize/2.);
+                let mut lineto = |newpos| {
+                    painter.line_segment([pos+spos, pos+newpos], stroke);
+                    spos = newpos;
+                };
 
-                ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
+                lineto(vec2(blocksize/4., blocksize/2.));
+                    lineto(vec2(blocksize*5./12., blocksize/4.));
+                    lineto(vec2(blocksize*7./12., blocksize/4.));
+                lineto(vec2(blocksize*9./12., blocksize/2.));
+                    lineto(vec2(blocksize*11./12., blocksize/4.));
+                    lineto(vec2(blocksize*13./12., blocksize/4.));
+                lineto(vec2(blocksize*15./12., blocksize/2.));
+                    lineto(vec2(blocksize*17./12., blocksize/4.));
+                    lineto(vec2(blocksize*19./12., blocksize/4.));
+                lineto(vec2(blocksize*21./12., blocksize/2.));
+                lineto(vec2(blocksize*2., blocksize/2.));
 
-                sign_element(ctx, &"L", pos, blocksize);
+                sign_element(painter, &format!("L{}", start_index), pos, blocksize);
+                start_index+1
             }
 
             Circuit::Element(Element::Warburg) => {
-                ctx.move_to(pos.0, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*3./4., pos.1 + blocksize/2.);
+                let line = |p1,p2| {
+                    painter.line_segment([pos+p1*blocksize, pos+p2*blocksize], stroke);
+                };
 
-                ctx.move_to(pos.0 + blocksize*3./4., pos.1);
-                ctx.line_to(pos.0 + blocksize*3./4., pos.1 + blocksize);
-                ctx.move_to(pos.0 + blocksize*6./4., pos.1);
-                ctx.line_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*6./4., pos.1 + blocksize);
+                line(vec2(0.0, 0.5), vec2(0.75, 0.5));
+                line(vec2(0.75, 0.0), vec2(0.75, 1.0));
+                line(vec2(1.5, 0.0), vec2(1.25, 0.5));
+                line(vec2(1.25, 0.5), vec2(1.5, 1.0));
+                line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
-
-                sign_element(ctx, &"W", pos, blocksize);
+                sign_element(painter, &format!("W{}", start_index), pos, blocksize);
+                start_index+1
             }
 
-            Circuit::Element(Element::CPE) => {
-                ctx.move_to(pos.0, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*3./4., pos.1 + blocksize/2.);
+            Circuit::Element(Element::Cpe) => {
+                let line = |p1,p2| {
+                    painter.line_segment([pos+p1*blocksize, pos+p2*blocksize], stroke);
+                };
 
-                ctx.move_to(pos.0 + blocksize*4./4., pos.1);
-                ctx.line_to(pos.0 + blocksize*3./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*4./4., pos.1 + blocksize);
+                line(vec2(0.0, 0.5), vec2(0.75, 0.5));
+                line(vec2(0.75, 0.5), vec2(1.0, 0.0));
+                line(vec2(0.75, 0.5), vec2(1.0, 1.0));
+                line(vec2(1.5, 0.0), vec2(1.25, 0.5));
+                line(vec2(1.25, 0.5), vec2(1.5, 1.0));
+                line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                ctx.move_to(pos.0 + blocksize*6./4., pos.1);
-                ctx.line_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*6./4., pos.1 + blocksize);
-
-                ctx.move_to(pos.0 + blocksize*5./4., pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize*2., pos.1 + blocksize/2.);
-
-                sign_element(ctx, &"Q", pos, blocksize);
+                sign_element(painter, &format!("Z{}", start_index), pos, blocksize);
+                start_index+1
             }
 
             Circuit::Series(elems) => {
-                let (mut x, y) = pos;
-
-                elems[0].paint( ctx, blocksize, (x, y) );
-                x += elems[0].painted_size().0 as f64 * blocksize;
+                let mut index = elems[0].paint(pos, blocksize, painter, start_index);
+                let mut pos = pos + vec2(elems[0].painted_size().0 as f32 * blocksize, 0.);
 
                 for c in elems[1..].iter() {
-                    c.paint( ctx, blocksize, (x, y) );
-                    x += c.painted_size().0 as f64 * blocksize;
+                    index = c.paint(pos, blocksize, painter, index);
+                    pos += vec2(c.painted_size().0 as f32 * blocksize, 0.);
                 }
+                index
             }
 
             Circuit::Parallel(elems) => {
-                let (_, mut y) = pos;
+                let mut index = start_index;
+                let mut y = pos.y;
                 let xsize = self.painted_size().0;
 
-                ctx.move_to(pos.0, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + blocksize, pos.1 + blocksize/2.);
-                ctx.move_to(pos.0 + (xsize-1) as f64 * blocksize, pos.1 + blocksize/2.);
-                ctx.line_to(pos.0 + (xsize-1) as f64 * blocksize + blocksize, pos.1 + blocksize/2.);
+                painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize, blocksize/2.)], stroke);
+                painter.line_segment([pos+vec2((xsize-1) as f32 * blocksize, blocksize/2.), pos+vec2(((xsize-1) as f32).mul_add(blocksize, blocksize), blocksize/2.)], stroke);
 
                 for c in elems.iter() {
                     let psize = c.painted_size().0;
-                    let drawend = pos.0 + (xsize as f64)*blocksize;
+                    let drawend =  (xsize as f32).mul_add(blocksize, pos.x);
                     let elemblock = (xsize-2-psize)/2 + 1;
-                    let elemstart = (elemblock as f64)*blocksize + pos.0;
-                    let elemend = elemstart + (psize as f64)*blocksize;
-                    c.paint( ctx, blocksize, (elemstart, y) );
+                    let elemstart = (elemblock as f32).mul_add(blocksize, pos.x);
+                    let elemend = (psize as f32).mul_add(blocksize, elemstart);
+                    index = c.paint(pos2(elemstart, y), blocksize, painter, index);
 
-                    ctx.move_to(pos.0 + blocksize/2., y+blocksize/2.);
-                    ctx.line_to(elemstart, y+blocksize/2.);
-                    ctx.move_to(elemend, y+blocksize/2.);
-                    ctx.line_to(pos.0 + (xsize as f64)*blocksize - blocksize/2., y+blocksize/2.);
+                    painter.line_segment([pos2(pos.x + blocksize/2., y+blocksize/2.), pos2(elemstart, y+blocksize/2.)], Stroke{color: Color32::RED, ..stroke});
+                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2((xsize as f32).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::BLUE, ..stroke});
 
-                    ctx.move_to(pos.0 + blocksize/2., pos.1+blocksize/2.);
-                    ctx.line_to(pos.0 + blocksize/2., y+blocksize/2.);
+                    painter.line_segment([pos+vec2(blocksize/2., blocksize/2.), pos2(pos.x + blocksize/2., y+blocksize/2.)], Stroke{color: Color32::YELLOW, ..stroke});
 
-                    ctx.move_to(drawend - blocksize/2., pos.1+blocksize/2.);
-                    ctx.line_to(drawend - blocksize/2., y+blocksize/2.);
-                    y += c.painted_size().1 as f64 * blocksize;
+                    painter.line_segment([pos2(drawend - blocksize/2., pos.y+blocksize/2.), pos2(drawend - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::RED, ..stroke});
+                    
+                    y += c.painted_size().1 as f32 * blocksize;
                 }
+                index
+            }
+        }
+    }
+
+    pub fn paramlen(&self) -> usize {
+        match self {
+            Circuit::Element(Element::Resistor) => 1,
+            Circuit::Element(Element::Capacitor) => 1,
+            Circuit::Element(Element::Inductor) => 1,
+            Circuit::Element(Element::Warburg) => 1,
+            Circuit::Element(Element::Cpe) => 2,
+            Circuit::Series(elems)|Circuit::Parallel(elems) => 
+                elems.iter().map(|x| x.paramlen()).sum(),
+        }
+    }
+
+    fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx{
+        match self {
+            Circuit::Element(Element::Resistor) => Cplx::new(params[0], 0.0),
+
+            Circuit::Element(Element::Capacitor) => 1.0 / (I * omega * params[0]),
+
+            Circuit::Element(Element::Inductor) => I * omega * params[0],
+
+            Circuit::Element(Element::Warburg) => (1.0 - I) * params[0] / omega.sqrt(),
+
+            Circuit::Element(Element::Cpe) => {
+                let q = params[0];
+                let n = params[1];
+                let numer = (-I*PI/2.0*n).exp();
+                let denom = q * omega.powf(n);
+                numer/denom
+            }
+
+            Circuit::Series(elems) => {
+                let mut cval = 0;
+                let mut imped = Cplx::new(0.0, 0.0);
+                for c in elems.iter() {
+                    let cend = cval + c.paramlen();
+                    let slc = &params[cval..cend];
+                    let ipd = c.impedance(omega, slc);
+                    imped += ipd;
+                    cval = cend;
+                }
+                imped
+            }
+
+            Circuit::Parallel(elems) => {
+                let mut cval = 0;
+                let mut admit = Cplx::new(0.0, 0.0);
+                for c in elems.iter() {
+                    let cend = cval + c.paramlen();
+                    let slc = &params[cval..cend];
+                    let ipd = c.impedance(omega, slc);
+                    admit += 1.0/ipd;
+                    cval = cend;
+                }
+                1.0/admit
             }
         }
     }
 
     pub fn impedance(&self, omega: f64, params: &[f64]) -> Cplx {
-        assert!(params.len() == self.paramlist().len());
-        return self._impedance(omega, params);
+        assert!(params.len() == self.paramlen());
+        self._impedance(omega, params)
     }
 
-    pub fn replace(&mut self, coord: (u16, u16), element: Circuit) -> Option<Circuit> {
+    pub fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
+        if dparam >= self.paramlen() {
+            //panic!("Gradient requested for {} parameter of {}", dparam, self)
+            panic!()
+        }
         match self {
-            Circuit::Element(_) => Some(element),
+            Circuit::Element(Element::Resistor) => Cplx::new(1.0, 0.0),
+
+            Circuit::Element(Element::Capacitor) => I / (omega * params[0].powi(2)),
+
+            Circuit::Element(Element::Inductor) => I * omega,
+
+            Circuit::Element(Element::Warburg) => ((1.0 - I)*params[0])/(omega.sqrt()),
+
+            Circuit::Element(Element::Cpe) => {
+                let q = params[0];
+                let n = params[1];
+                let numer = (-I*PI/2.0*n).exp();
+                let denom = q * omega.powf(n);
+                match dparam {
+                    0 => {-numer/denom/q}
+                    1 => {-(omega.ln() + I*PI/2.0)*numer/denom}
+                    _ => unreachable!()
+                }
+            }
+
+            Circuit::Series(elems) => {
+                let mut cval = 0;
+                for c in elems.iter() {
+                    let cend = cval + c.paramlen();
+                    let slc = &params[cval..cend];
+                    if cval <= dparam && dparam<cend {
+                        return c._d_impedance(omega, slc, dparam-cval);
+                    }
+                    cval = cend;
+                }
+                unreachable!()
+            }
+
+            Circuit::Parallel(elems) => {
+                let mut cval = 0;
+                for c in elems.iter() {
+                    let cend = cval + c.paramlen();
+                    let slc = &params[cval..cend];
+                    if cval <= dparam && dparam<cend {
+                        let denommed = self._impedance(omega, params);
+                        return denommed.powi(2) / c.impedance(omega, slc).powi(2) * c._d_impedance(omega, slc, dparam-cval);
+                    }
+                    cval = cend;
+                }
+                unreachable!()
+            }
+        }
+    }
+
+
+    pub fn _replace<'a>(&mut self, 
+                coord: (u16, u16), 
+                element: Element, 
+                paramlist: impl Iterator<Item = &'a mut ParameterDesc>, 
+                param_idx: usize,
+                editability: &mut Vec<ParameterEditability>) {
+        match self {
+            Circuit::Element(e) => {
+                e.exchange_param(element, param_idx, paramlist, editability);
+                editability[param_idx] = ParameterEditability::Plural;
+                *self = Self::Element(element);
+            },
 
             Circuit::Series(elems) => {
                 assert!(elems.len() > 1);
-                if let Some((i,start_x)) = series_index_by_block(&elems, coord) {
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
                     let el = &mut elems[i];
-                    if let Some(rp) = el.replace((coord.0 - start_x, coord.1), element) {
-                        *el = rp;
-                    }
+                    el._replace((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability)
                 }
-                None
             }
 
             Circuit::Parallel(elems) => {
                 assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(&elems, coord);
+                let ib = parallel_index_by_block(elems, coord);
 
                 match ib {
-                    ParallelBlockPicked::This => Some(element),
-                    ParallelBlockPicked::None => None,
+                    ParallelBlockPicked::This => {
+                        // todo!()
+                    },
+                    ParallelBlockPicked::None => {
+                    },
                     ParallelBlockPicked::Child(i, elemblock, start_y) => {
+                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
                         let el = &mut elems[i];
-                        if let Some(rp) = el.replace((coord.0 - elemblock, coord.1 - start_y), element) {
-                            *el = rp;
-                        };
-                        None
+                        el._replace((coord.0 - elemblock, coord.1 - start_y), element, paramlist, new_pidx, editability);
+                    }
+                }
+            }
+        }
+    }
+ 
+    pub fn replace(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+        self._replace(coord, element, paramlist, 0, editability)
+    }
+
+    pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, ParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
+        match self {
+            Circuit::Element(e) => {
+                let new = Self::Series(vec![Self::Element(*e), Self::Element(element)]);
+                let paramlen = self.paramlen();
+                element.insert_param(param_idx+paramlen, paramlist, editability);
+                *self = new;
+            },
+
+            Circuit::Series(elems) => {
+                assert!(elems.len() > 1);
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    if let Circuit::Element(_) = elems[i] {
+                        let new_pidx = param_idx + (0..=i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        elems.insert(i+1, Self::Element(element));
+                        element.insert_param(new_pidx, paramlist, editability);
+                    }
+                    else {
+                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        elems[i]._add_series((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability)
+                    }
+                }
+            }
+
+            Circuit::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+
+                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                    elems[i]._add_series((coord.0-elemblock, coord.1-start_y), element, paramlist, new_pidx, editability);
+                }
+            }
+        }
+    }
+
+    pub fn _add_parallel(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, ParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
+        match self {
+            Self::Element(e) => {
+                let new = Self::Parallel(vec![Self::Element(*e), Self::Element(element)]);
+                let paramlen = self.paramlen();
+                element.insert_param(param_idx+paramlen, paramlist, editability);
+                *self = new;
+            },
+
+            Self::Series(elems) => {
+                assert!(elems.len() > 1);
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                    elems[i]._add_parallel((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability)
+                }
+            }
+
+            Self::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+
+                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    if let Self::Element(_) = elems[i] {
+                        let new_pidx = param_idx + (0..=i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        elems.insert(i+1, Self::Element(element));
+                        element.insert_param(new_pidx, paramlist, editability);
+                    }
+                    else {
+                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        elems[i]._add_parallel((coord.0-elemblock, coord.1-start_y), element, paramlist, new_pidx, editability);
                     }
                 }
             }
         }
     }
 
-    pub fn add_series(&mut self, coord: (u16, u16), element: Circuit) -> Option<Circuit>{
+
+    pub fn _remove(&mut self, coord: (u16, u16), paramlist: std::slice::IterMut<'_, ParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>) {
         match self {
-            Circuit::Element(_) => Some(element),
+            Circuit::Element(_) => {},
 
             Circuit::Series(elems) => {
                 assert!(elems.len() > 1);
-                if let Some((i, start_x)) = series_index_by_block(&elems, coord) {
-                    if let Some(elem) = elems[i].add_series((coord.0-start_x, coord.1), element) {
-                        elems.insert(i+1, elem);
-                    }
-                }
-                None
-            }
-
-            Circuit::Parallel(elems) => {
-                assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(&elems, coord);
-
-                match ib {
-                    ParallelBlockPicked::Child(i, elemblock, start_y) => {
-                        if let Some(elem) = elems[i].add_series((coord.0-elemblock, coord.1-start_y), element) {
-                            let prev = elems.remove(i);
-                            elems.insert(i, Circuit::Series(vec![prev, elem]));
-                        }
-                        None
-                    }
-                    _ => None
-                }
-            }
-        }
-    }
-
-    pub fn add_parallel(&mut self, coord: (u16, u16), element: Circuit) -> Option<Circuit>{
-        match self {
-            Circuit::Element(_) => Some(element),
-
-            Circuit::Series(elems) => {
-                assert!(elems.len() > 1);
-                if let Some((i, startx)) = series_index_by_block(&elems, coord){
-                    if let Some(elem) = elems[i].add_parallel((coord.0-startx, coord.1), element) {
-                        let prev = elems.remove(i);
-                        elems.insert(i, Circuit::Parallel(vec![prev, elem]));
-                    }
-                    None
-                }
-                else {
-                    Some(element)
-                }
-            }
-
-            Circuit::Parallel(elems) => {
-                assert!(elems.len() > 1);
-
-                let ib = parallel_index_by_block(&elems, coord);
                 
+                if let Some((i,start_x)) = series_index_by_block(elems, coord) {
+                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                    let elemlen = elems.len();
+                    if let Circuit::Element(el) = &mut elems[i] {
+                        el.remove_param(new_pidx, paramlist, editability);
+                        if elemlen == 2 {
+                            *self = elems[if i == 0 {1} else {0}].clone();
+                        }
+                        else {
+                            elems.remove(i);
+                        }
+                    }
+                    else {
+                        elems[i]._remove((coord.0 - start_x, coord.1), paramlist, new_pidx, editability);
+                    }
+                }
+            }
+
+            Circuit::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+
                 match ib {
                     ParallelBlockPicked::Child(i, elemblock, start_y) => {
-                        if let Some(elem) = elems[i].add_parallel((coord.0-elemblock, coord.1-start_y), element) {
-                            elems.insert(i+1, elem);
+                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        let elemlen = elems.len();
+                        if let Circuit::Element(el) = &mut elems[i] {
+                            el.remove_param(new_pidx, paramlist, editability);
+                            if elemlen == 2 {
+                                *self = elems[if i == 0 {1} else {0}].clone();
+                            }
+                            else {
+                                elems.remove(i);
+                            }
                         }
-                        None
+                        else {
+                            elems[i]._remove((coord.0-elemblock, coord.1-start_y), paramlist, new_pidx, editability);
+                        }
                     }
                     ParallelBlockPicked::This => {
-                        None
+                        
                     }
                     ParallelBlockPicked::None => {
-                        None
-                    }
-                }
-            }
-        }
-    }
-
-
-    pub fn remove(&mut self, coord: (u16, u16)) -> RemoveAction {
-        match self {
-            Circuit::Element(_) => RemoveAction::Remove,
-
-            Circuit::Series(elems) => {
-                assert!(elems.len() > 1);
-                
-                if let Some((i,start_x)) = series_index_by_block(&elems, coord) {
-                    let el = &mut elems[i];
-                    let remove_sub = el.remove((coord.0 - start_x, coord.1));
-                    match remove_sub {
-                        RemoveAction::DoNothing => {return RemoveAction::DoNothing;}
-                        RemoveAction::ChangeTo(newelem) => {*el = newelem; return RemoveAction::DoNothing;}
-                        RemoveAction::Remove => {elems.remove(i);}
-                    }
-                }
-
-                if elems.len() == 1 {
-                    RemoveAction::ChangeTo(elems.pop().unwrap())
-                }
-                else {
-                    RemoveAction::DoNothing
-                }
-            }
-
-            Circuit::Parallel(elems) => {
-                assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(&elems, coord);
-
-                match ib {
-                    ParallelBlockPicked::Child(i, elemblock, start_y) => {
-                        let remove_sub = elems[i].remove((coord.0-elemblock, coord.1-start_y));
-                        match remove_sub {
-                            RemoveAction::DoNothing => {return RemoveAction::DoNothing;},
-                            RemoveAction::ChangeTo(newelem) => {elems[i] = newelem; return RemoveAction::DoNothing;}
-                            RemoveAction::Remove => {elems.remove(i);}
-                        }
-
-                        if elems.len() == 1 
-                            { RemoveAction::ChangeTo(elems.pop().unwrap()) }
-                        else
-                            { RemoveAction::DoNothing }
-                    }
-                    ParallelBlockPicked::This => {
-                        RemoveAction::Remove
-                    }
-                    ParallelBlockPicked::None => {
-                        RemoveAction::DoNothing
+                        
                     }
                 }
             }
@@ -634,99 +655,83 @@ impl Circuit {
 }
 
 
-// TODO Positive tests only
-#[cfg(test)]
-mod test {
-    use super::*;
 
-    fn approx_cplx(x: Cplx, y: Cplx, dev: f64) -> bool {
-        let diff = y-x;
-        let d2 = diff * diff.conj();
-        return d2.re < dev*dev;
+impl std::fmt::Display for Circuit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Circuit::Element(Element::Resistor) => write!(f, "R"),
+            Circuit::Element(Element::Capacitor) => write!(f, "C"),
+            Circuit::Element(Element::Inductor) => write!(f, "L"),
+            Circuit::Element(Element::Warburg) => write!(f, "W"),
+            Circuit::Element(Element::Cpe) => write!(f, "Q"),
+            Circuit::Series(elems) => {
+                write!(f, "[")?;
+                for e in elems { e.fmt(f)?; }
+                write!(f, "]")
+            }
+            Circuit::Parallel(elems) => {
+                write!(f, "{{")?;
+                for e in elems { e.fmt(f)?; }
+                write!(f, "}}")
+            }
+        }
     }
-    const APPROX_VAL : f64 = 1e-12;
+}
 
+enum CircuitParseElement {Circ(Circuit), Series, Parallel}
+impl std::str::FromStr for Circuit {
+    type Err = ();
 
-    #[test]
-    fn test_elements() {
-        
-        assert!(approx_cplx(Circuit::Element(Element::Resistor).impedance(1.0, &[20.0]), Cplx::new(20.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Resistor).impedance(1.0, &[200.0]), Cplx::new(200.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Resistor).impedance(1.0, &[2000.0]), Cplx::new(2000.0, 0.0), APPROX_VAL));
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut stack : Vec<CircuitParseElement> = vec![];
 
-        assert!(approx_cplx(Circuit::Element(Element::Capacitor).impedance(1.0, &[(20.0)]), Cplx::new(0.0, -1.0/20.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Capacitor).impedance(1.0, &[(200.0)]), Cplx::new(0.0, -1.0/200.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Capacitor).impedance(10.0, &[(20.0)]), Cplx::new(0.0, -1.0/200.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Capacitor).impedance(10.0, &[(200.0)]), Cplx::new(0.0, -1.0/2000.0), APPROX_VAL));
+        for c in s.chars() {
+            match c {
+                'R' => {stack.push(CircuitParseElement::Circ(Self::Element(Element::Resistor)));}
+                'C' => {stack.push(CircuitParseElement::Circ(Self::Element(Element::Capacitor)));}
+                'L' => {stack.push(CircuitParseElement::Circ(Self::Element(Element::Inductor)));}
+                'W' => {stack.push(CircuitParseElement::Circ(Self::Element(Element::Warburg)));}
+                'Q' => {stack.push(CircuitParseElement::Circ(Self::Element(Element::Cpe)));}
+                '[' => {stack.push(CircuitParseElement::Series);}
+                '{' => {stack.push(CircuitParseElement::Parallel);}
 
-        assert!(approx_cplx(Circuit::Element(Element::Inductor).impedance(1.0, &[(20.0)]), Cplx::new(0.0, 20.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Inductor).impedance(1.0, &[(200.0)]), Cplx::new(0.0, 200.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Inductor).impedance(10.0, &[(20.0)]), Cplx::new(0.0, 200.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Inductor).impedance(10.0, &[(200.0)]), Cplx::new(0.0, 2000.0), APPROX_VAL));
+                ']' => {
+                    let mut elements : Vec<Self> = vec![];
 
-        assert!(approx_cplx(Circuit::Element(Element::Warburg).impedance(1.0, &[(20.0)]), Cplx::new(20.0, -20.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Warburg).impedance(1.0, &[(200.0)]), Cplx::new(200.0, -200.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Warburg).impedance(100.0, &[(20.0)]), Cplx::new(2.0, -2.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::Warburg).impedance(100.0, &[(200.0)]), Cplx::new(20.0, -20.0), APPROX_VAL));
+                    while let Some(v) = stack.pop() {
+                        match v {
+                            CircuitParseElement::Circ(c) => {elements.insert(0, c);}
+                            CircuitParseElement::Series => {break;}
+                            CircuitParseElement::Parallel => {return Err(());}
+                        }
+                    }
 
-        assert!(approx_cplx(Circuit::Element(Element::CPE).impedance(1.0, &[1.0/20.0, 0.0]), Cplx::new(20.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::CPE).impedance(10.0, &[1.0/20.0, 0.0]), Cplx::new(20.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::CPE).impedance(1.0, &[20.0, 1.0]), Cplx::new(0.0, -1.0/20.0), APPROX_VAL));
-        assert!(approx_cplx(Circuit::Element(Element::CPE).impedance(10.0, &[20.0, 1.0]), Cplx::new(0.0, -1.0/200.0), APPROX_VAL));
-    }
+                    stack.push(CircuitParseElement::Circ(Self::Series(elements)));
+                }
 
-    #[test]
-    fn test_resistance() {
-        let circ1 = Circuit::Series(vec![
-            Circuit::Element(Element::Resistor),
-            Circuit::Element(Element::Resistor),
-        ]);
+                '}' => {
+                    let mut elements : Vec<Self> = vec![];
 
-        let circ2 = Circuit::Parallel(vec![
-            Circuit::Element(Element::Resistor),
-            Circuit::Element(Element::Resistor),
-        ]);
+                    while let Some(v) = stack.pop() {
+                        match v {
+                            CircuitParseElement::Circ(c) => {elements.insert(0, c);}
+                            CircuitParseElement::Series => {return Err(());}
+                            CircuitParseElement::Parallel => {break;}
+                        }
+                    }
 
-        let params = [
-            (40.0),
-            (40.0),
-        ];
-        
-        println!("{:.3}", circ1.impedance(1.0, &params).norm_sqr().sqrt());
-        println!("{:.3}", circ2.impedance(1.0, &params).norm_sqr().sqrt());
+                    stack.push(CircuitParseElement::Circ(Self::Parallel(elements)));
+                }
 
-        assert!(approx_cplx(circ1.impedance(1.0, &params), Cplx::new(80.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(circ2.impedance(1.0, &params), Cplx::new(20.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(circ1.impedance(10.0, &params), Cplx::new(80.0, 0.0), APPROX_VAL));
-        assert!(approx_cplx(circ2.impedance(10.0, &params), Cplx::new(20.0, 0.0), APPROX_VAL));
-    }
+                _ => {return Err(())}
+            }
+        }
 
-    #[test]
-    fn test_c() {
-        let circ1 = Circuit::Series(vec![
-            Circuit::Element(Element::Resistor),
-            Circuit::Element(Element::Capacitor),
-        ]);
-
-        let circ2 = Circuit::Parallel(vec![
-            Circuit::Element(Element::Resistor),
-            Circuit::Element(Element::Capacitor),
-        ]);
-
-        let params = [
-            (40.0),
-            (1.0),
-        ];
-
-        println!("{:.3}", circ1.impedance(1.0, &params));
-        println!("{:.3}", circ2.impedance(1.0, &params));
-        println!("{:.3}", circ1.impedance(10.0, &params));
-        println!("{:.3}", circ2.impedance(10.0, &params));
-
-        assert!(approx_cplx(circ1.impedance(1.0, &params), Cplx::new(40.0, -1.0), APPROX_VAL));
-        assert!(approx_cplx(circ1.impedance(10.0, &params), Cplx::new(40.0, -0.1), APPROX_VAL));
-
-        assert!(approx_cplx(circ2.impedance(1.0, &params), 1.0/Cplx::new(1.0/40.0, 1.0), APPROX_VAL));
-        assert!(approx_cplx(circ2.impedance(10.0, &params), 1.0/Cplx::new(1.0/40.0, 10.0), APPROX_VAL));
+        if stack.len() == 1 {
+            if let Some(CircuitParseElement::Circ(ret)) = stack.pop() {
+                return Ok(ret);
+            }
+        }
+        Err(())
     }
 }

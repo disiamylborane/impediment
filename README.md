@@ -21,6 +21,6 @@ See [interface guide](doc/manual/Usage.md).
 
 The software is written in [Rust](http://github.com/rust-lang/rust/), it requires [rust toolchain](https://rustup.rs/) to be built.
 
-The software uses `gtk-rs` crate. It expects GTK+, GLib and Cairo development packages. See gtk-rs [requirements page](http://gtk-rs.org/docs/requirements.html).
+The software depends on `egui` crate. See egui [requirements](https://github.com/emilk/egui_template/#testing-locally).
 
-Simply `cargo build --release` to build the application.
+Run `cargo build --release` to build the application.

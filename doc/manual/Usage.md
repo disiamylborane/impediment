@@ -17,7 +17,7 @@ parameter sets:
 
 # GUI
 
-![Application GUI Image](interface.png)
+![Application GUI Image](uinterface.png)
 
 ## Circuit editor
 
@@ -43,44 +43,36 @@ To edit the circuit element:
 
 ## Dataset editor
 
-Navigate through the datasets by _dataset selector_. To change the name of the current dataset, type a new name inside _dataset selector_ and press Enter.
+Navigate through the datasets by _dataset box_. To change the name of
+the current dataset, type a new name inside _dataset box_ and press Enter.
 
 Click "Load" button to create a new dataset from CSV file.
 
+Click "+" button to add a new empty dataset.
+
 Click "-" button to delete the current dataset.
 
-[Save and + buttons are WIP].
+The dataset may be edited in a _data editor_. The values are stored
+in the format of {Frequency, Hz}: {Re Z} + {Im Z}i.
 
 ## Parameter editor
 
 The parameters are listed in _parameter box_.
 
-[The parameter names are WIP.]
+All the parameters contain min and max bounds (used by fitting routines) and
+the parameter value itself.
 
-All the parameters contain bound min and max values (used by fitting routines) and the parameter value itself.
-
-When the parameter values are edited, the plots are immediately updated.
+When the parameter values are edited, the plots are updated. One can use "<" 
+and ">" buttons to increase or decrease the parameter value logatithmically.
+Alt-click for slower, Ctrl-click for faster.
 
 Click "Fit" button to perform a fitting routine with the selected method.
 
-## Plots [Deeply WIP]
+The complete parameter set may be copied and pasted ("Copy"/"Paste" buttons) for
+the same circuit.
 
-Three plot types are currently available:
+# CSV loading (WIP)
 
-* Bode phase-log frequency plot
-* Bode amplitude-log frequency plot
-* Nyquist Im Z-Re Z plot
-
-# CSV loading dialog
-
-![CSV dialog GUI Image](csv_dialog.png)
-
-# Customizations
-
-When the CSV file is loading, the following may be customized:
-
-* Start line &mdash; the amount of header lines to be skipped
-* The columns of frequency, Real(Impedance) and Imag(Impedance) data
-* Frequency and impedance units.
-
-The preview window shows several data rows. When a file or configuration is unparseable, the preview is displayed red.
+The CSV loading procedure allows to load nultiple files with the same data layout
+at once. After the files are selected, customize the CSV column numbers for
+frequency, real and imaginary impedance values. The data preview is available.
