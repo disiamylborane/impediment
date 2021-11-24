@@ -1,10 +1,10 @@
 # impediment
 
-[WIP] An interactive tool for impedance spectra modelling and fitting
+Impediment is an interactive tool for impedance spectra modelling and fitting
 
 Currently supports:
 
-* An interactive equivalent circuit builder
+* An equivalent circuit builder
 * CSV file import
 * Model parameter fitting using [nlopt](https://crates.io/crates/nlopt)
 * Manual parameter fitting
@@ -12,10 +12,6 @@ Currently supports:
 # Usage
 
 See [interface guide](doc/manual/Usage.md).
-
-# Screenshots
-
-![Front Picture](doc/screenshots/front_pic.png)
 
 # Building
 

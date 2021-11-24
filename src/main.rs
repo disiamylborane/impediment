@@ -314,7 +314,7 @@ impl Default for TemplateApp {
 
 impl epi::App for TemplateApp {
     fn name(&self) -> &str {
-        "egui template"
+        "Impediment"
     }
 
     /// Called each time the UI needs repainting, which may be many times per second.
