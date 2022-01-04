@@ -25,6 +25,14 @@ Click a textbox in dataset editor to select a circuit. It also highlights with r
 
 The circuits and datasets may be renamed in-place.
 
+## Plot graph
+
+Drag or scroll to navigate.
+
+Ctrl-scroll to zoom.
+
+Double click to reset limits.
+
 ## Circuit editor
 
 Click "+" button to add a new circuit.

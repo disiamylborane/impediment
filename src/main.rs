@@ -1,4 +1,5 @@
 #![warn(clippy::nursery)]
+#![warn(clippy::pedantic)]
 
 use std::{fmt::Display, str::FromStr};
 
@@ -65,6 +66,8 @@ impl Display for ImpOpenParam {
     }
 }
 
+pub enum PlotType {Nyquist, BodePhase, BodeAmp}
+
 pub struct TemplateApp {
     pub fit_method: FitMethod,
     pub component: ElectricComponent,
@@ -83,6 +86,8 @@ pub struct TemplateApp {
     pub opening_mode: (FreqOpenParam, ImpOpenParam, usize, usize, usize, usize),
 
     pub copied_paramlist: Option<(usize, usize)>,
+
+    pub plot_type: PlotType,
 }
 
 type AppData = (Vec<Model>, Vec<(Vec<DataPiece>, String)>, Vec< Vec< ParameterDesc >>);
@@ -305,7 +310,8 @@ impl Default for TemplateApp {
             editor: String::with_capacity(64),
             opening_data: vec![],
             opening_mode: (FreqOpenParam::Hz, ImpOpenParam::PlusOhm, 0, 1, 2, 0),
-            copied_paramlist: None
+            copied_paramlist: None,
+            plot_type: PlotType::Nyquist,
         };
         out.editor = dataset_to_string(&out.datasets[out.current_dataset].0);
         out
@@ -333,6 +339,7 @@ impl epi::App for TemplateApp {
             opening_data,
             opening_mode,
             copied_paramlist,
+            plot_type,
         ..} = self;
 
         if !opening_data.is_empty() {
@@ -779,21 +786,57 @@ impl epi::App for TemplateApp {
                     None => return,
                 }.0;
 
+                ui.horizontal(|ui|
+                    if ui.small_button("Nyquist").clicked() {
+                        *plot_type = PlotType::Nyquist
+                    }
+                    else if ui.small_button("Bode Amplitude").clicked() {
+                        *plot_type = PlotType::BodeAmp
+                    }
+                    else if ui.small_button("Bode Phase").clicked() {
+                        *plot_type = PlotType::BodePhase
+                    }
+                );
+
                 let plt = egui::plot::Plot::new("plot1")
                     .points(egui::plot::Points::new(
-                        egui::plot::Values::from_values( dataset.iter().map(|d| egui::plot::Value::new(d.imp.re, -d.imp.im)).collect::<Vec<_>>() )
+                        egui::plot::Values::from_values( dataset.iter().map(|d| 
+                                match plot_type {
+                                    PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
+                                    PlotType::BodePhase => egui::plot::Value::new(d.freq, -d.imp.arg()*180.0/3.1415926),
+                                    PlotType::BodeAmp => egui::plot::Value::new(d.freq, d.imp.norm()),
+                                }
+                            ).collect::<Vec<_>>() )
                         )
                         .shape(egui::plot::MarkerShape::Circle)
                         .radius(4.)
                     );
-                
+
+                let dlen = dataset.len();
+
+                let rmin;
+                let rmax;
+                if dlen > 1 {
+                    rmin = dataset[0].freq;
+                    rmax = dataset[dlen-1].freq;
+                } else if dlen == 1 {
+                    rmin = dataset[0].freq/2.0;
+                    rmax = dataset[0].freq*2.0;
+                } else {
+                    rmin = 1.0;
+                    rmax = 1000.0;
+                }
+
                 let plt = if let Some(m) = models.get(*current_circ) {
                     let values = 
-                    dataset.iter().map(|d| {
-                        let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &params[*current_circ][*current_dataset].vals);
-                        egui::plot::Value::new(
-                            imp.re, -imp.im
-                        )
+                    (0..1000).map(|i| {
+                        let f = rmin + ((rmax - rmin)/1000.0 * i as f64);
+                        let imp = m.circuit.impedance(std::f64::consts::TAU*f, &params[*current_circ][*current_dataset].vals);
+                        match plot_type {
+                            PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                            PlotType::BodePhase => egui::plot::Value::new(f, -imp.arg()*180.0/3.1415926),
+                            PlotType::BodeAmp => egui::plot::Value::new(f, imp.norm()),
+                        }
                     }).collect();
                     plt.line(egui::plot::Line::new(egui::plot::Values::from_values(values)).stroke((1.0, Color32::WHITE)))
                 } else {plt};

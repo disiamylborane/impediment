@@ -344,12 +344,12 @@ impl Circuit {
                     let elemend = (psize as f32).mul_add(blocksize, elemstart);
                     index = c.paint(pos2(elemstart, y), blocksize, painter, index);
 
-                    painter.line_segment([pos2(pos.x + blocksize/2., y+blocksize/2.), pos2(elemstart, y+blocksize/2.)], Stroke{color: Color32::RED, ..stroke});
-                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2((xsize as f32).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::BLUE, ..stroke});
+                    painter.line_segment([pos2(pos.x + blocksize/2., y+blocksize/2.), pos2(elemstart, y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
+                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2((xsize as f32).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
 
-                    painter.line_segment([pos+vec2(blocksize/2., blocksize/2.), pos2(pos.x + blocksize/2., y+blocksize/2.)], Stroke{color: Color32::YELLOW, ..stroke});
+                    painter.line_segment([pos+vec2(blocksize/2., blocksize/2.), pos2(pos.x + blocksize/2., y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
 
-                    painter.line_segment([pos2(drawend - blocksize/2., pos.y+blocksize/2.), pos2(drawend - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::RED, ..stroke});
+                    painter.line_segment([pos2(drawend - blocksize/2., pos.y+blocksize/2.), pos2(drawend - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
                     
                     y += c.painted_size().1 as f32 * blocksize;
                 }
