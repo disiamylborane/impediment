@@ -272,37 +272,35 @@ fn block_by_coords(circuit: &Circuit, widsize: Vec2, clickpos: Vec2, blocksize: 
 
 impl Default for TemplateApp {
     fn default() -> Self {
+        let circ = Circuit::Series(vec![
+            Circuit::Parallel(vec![
+                Circuit::Element(Element::Resistor), 
+                Circuit::Element(Element::Capacitor),
+            ]),
+            Circuit::Element(Element::Resistor),
+        ]);
+        let params = ParameterDesc { vals : vec![100.,0.000005,100.], bounds : vec![(1., 10000.),(1e-6, 1e-1),(1., 10000.0)] };
+
+        let data = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5].iter().map(|&freq|
+            data::DataPiece {freq, imp: circ.impedance(std::f64::consts::TAU*freq, &params.vals)}
+        ).collect();
+
         let mut out = Self {
             fit_method: FitMethod::BOBYQA,
             component: ElectricComponent::R,
             interaction: ComponentInteraction::Change,
             models: vec![
                 Model{
-                    circuit: Circuit::Series(vec![Circuit::Element(Element::Resistor), Circuit::Element(Element::Capacitor)]), 
+                    circuit: circ, 
                     name: "model1".to_owned(), 
-                    parameters: vec![ParameterEditability::Plural, ParameterEditability::Plural]},
-                Model{
-                    circuit: Circuit::Parallel(vec![Circuit::Element(Element::Resistor), Circuit::Element(Element::Capacitor)]),
-                    name: "model2".to_owned(),
-                    parameters: vec![ParameterEditability::Plural, ParameterEditability::Plural]
-                },
+                    parameters: vec![ParameterEditability::Plural, ParameterEditability::Plural, ParameterEditability::Plural]},
             ],
             datasets: vec![
-                (vec![
-                    data::DataPiece {freq: 100000., imp: Cplx::new(2., 2.)},
-                    data::DataPiece {freq: 80000., imp: Cplx::new(3., 3.)},
-                    data::DataPiece {freq: 60000., imp: Cplx::new(3., 4.)},
-                ], "data1".to_owned()),
-                (vec![], "data2".to_owned()),
+                (data, "data1".to_owned()),
             ],
             params: vec![
                 vec![
-                    ParameterDesc { vals : vec![100.,0.01], bounds : vec![(1., 10000.),(1e-5, 1e1)] },
-                    ParameterDesc { vals : vec![100.,0.01], bounds : vec![(1., 10000.),(1e-5, 1e1)] },
-                ],
-                vec![
-                    ParameterDesc { vals : vec![100.,0.01], bounds : vec![(1., 10000.),(1e-5, 1e1)] },
-                    ParameterDesc { vals : vec![100.,0.01], bounds : vec![(1., 10000.),(1e-5, 1e1)] },
+                    ParameterDesc { vals : vec![110.,0.0000045,102.], bounds : vec![(1., 10000.),(1e-6, 1e-1),(1., 10000.0)] },
                 ],
             ],
             current_circ: 0,
@@ -316,6 +314,13 @@ impl Default for TemplateApp {
         out.editor = dataset_to_string(&out.datasets[out.current_dataset].0);
         out
     }
+}
+
+pub fn geomspace(first: f64, last: f64, count: usize) -> impl Iterator<Item=f64>
+{
+    let (lf, ll) = (first.ln(), last.ln());
+    let delta = (ll - lf) / ((count-1) as f64);
+    return (0..count).map(move |i| (lf + (i as f64) * delta).exp());
 }
 
 impl epi::App for TemplateApp {
@@ -655,7 +660,7 @@ impl epi::App for TemplateApp {
                                 }
                             };
                             let exps = &datasets[*current_dataset].0;
-                            
+
                             let mut loss = 0.0_f64;
                             for point in exps {
                                 let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
@@ -762,12 +767,12 @@ impl epi::App for TemplateApp {
                             }
 
                             if ui.small_button("<").clicked() {
-                                if ctx.input().modifiers.alt  { *val /= 1.01 }
+                                if ctx.input().modifiers.shift  { *val /= 1.01 }
                                 else if ctx.input().modifiers.command { *val /= 2.0 }
                                 else { *val /= 1.1 }
                             }
                             if ui.small_button(">").clicked() {
-                                if ctx.input().modifiers.alt  { *val *= 1.01 }
+                                if ctx.input().modifiers.shift  { *val *= 1.01 }
                                 else if ctx.input().modifiers.command { *val *= 2.0 }
                                 else { *val *= 1.1 }
                             }
@@ -803,8 +808,8 @@ impl epi::App for TemplateApp {
                         egui::plot::Values::from_values( dataset.iter().map(|d| 
                                 match plot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
-                                    PlotType::BodePhase => egui::plot::Value::new(d.freq, -d.imp.arg()*180.0/3.1415926),
-                                    PlotType::BodeAmp => egui::plot::Value::new(d.freq, d.imp.norm()),
+                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg()*180.0/3.1415926),
+                                    PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
                                 }
                             ).collect::<Vec<_>>() )
                         )
@@ -828,20 +833,42 @@ impl epi::App for TemplateApp {
                 }
 
                 let plt = if let Some(m) = models.get(*current_circ) {
-                    let values = 
-                    (0..1000).map(|i| {
-                        let f = rmin + ((rmax - rmin)/1000.0 * i as f64);
+                    let values = geomspace(rmin, rmax, 1000).map(
+                        |f| {
+                        //let f = rmin + ((rmax - rmin)/1000.0 * i as f64);
                         let imp = m.circuit.impedance(std::f64::consts::TAU*f, &params[*current_circ][*current_dataset].vals);
                         match plot_type {
                             PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                            PlotType::BodePhase => egui::plot::Value::new(f, -imp.arg()*180.0/3.1415926),
-                            PlotType::BodeAmp => egui::plot::Value::new(f, imp.norm()),
+                            PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg()*180.0/3.1415926),
+                            PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
                         }
                     }).collect();
-                    plt.line(egui::plot::Line::new(egui::plot::Values::from_values(values)).stroke((1.0, Color32::WHITE)))
+                    plt.line(egui::plot::Line::new(egui::plot::Values::from_values(values)).stroke((0.5, Color32::WHITE)))
                 } else {plt};
 
-                ui.add(plt.view_aspect(1.0));
+                let plt = if let Some(m) = models.get(*current_circ) {
+                    let values = 
+                    dataset.iter().map(|d| {
+                        let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &params[*current_circ][*current_dataset].vals);
+                        match plot_type {
+                            PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                            PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg()*180.0/3.1415926),
+                            PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
+                        }
+                    }).collect();
+                    plt.points(egui::plot::Points::new(egui::plot::Values::from_values(values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.))
+                } else {plt};
+
+                let plt = plt
+                    .width(ui.available_width())
+                    .height(ui.available_height()/2.0);
+                ui.add(plt);
+
+                ui.label(match plot_type{
+                    PlotType::Nyquist => "-Im Z vs Re Z",
+                    PlotType::BodeAmp => "|Z| vs lg freq",
+                    PlotType::BodePhase => "arg Z vs lg freq",
+                });
 
                 egui::ScrollArea::auto_sized().show(ui, |ui| {
                     let edit = egui::TextEdit::multiline(editor)
