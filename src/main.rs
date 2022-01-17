@@ -431,7 +431,7 @@ impl epi::App for TemplateApp {
 
         egui::SidePanel::left("models").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("Load").clicked() {
+                if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a circuit");}).clicked() {
                     if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_open_single_file() {
                         if let Ok(file) = std::fs::File::open(filename.clone()) {
                             use std::io::BufRead;
@@ -452,7 +452,7 @@ impl epi::App for TemplateApp {
                     }
                 }
 
-                if ui.button("Save").clicked() {
+                if ui.button("Save").on_hover_ui(|ui| {ui.label("Save current circuit");}).clicked() {
                     if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
                         if let Ok(mut file) = std::fs::File::create(filename) {
                             if let Some(mdl) = models.get(*current_circ) {
@@ -463,7 +463,7 @@ impl epi::App for TemplateApp {
                     }
                 }
 
-                if ui.button("+").clicked() {
+                if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");}).clicked() {
                     let newmodel = Model {
                         circuit: Circuit::Element(Element::Resistor),
                         name: "new model".to_string(),
@@ -477,7 +477,7 @@ impl epi::App for TemplateApp {
                     );
                     models.push(newmodel);
                 };
-                if ui.button("-").clicked() && models.len() > 1 {
+                if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");}).clicked() && models.len() > 1 {
                     models.remove(*current_circ);
                     params.remove(*current_circ);
                     if *current_circ != 0 {*current_circ -= 1;}
@@ -487,16 +487,18 @@ impl epi::App for TemplateApp {
             ui.separator();
 
             ui.horizontal(|ui| {
-                ui.selectable_value(component, ElectricComponent::R, "R");
-                ui.selectable_value(component, ElectricComponent::C, "C");
-                ui.selectable_value(component, ElectricComponent::L, "L");
-                ui.selectable_value(component, ElectricComponent::W, "W");
-                ui.selectable_value(component, ElectricComponent::Q, "Q");
+                ui.selectable_value(component, ElectricComponent::R, "R").on_hover_ui(|ui| {ui.label("Resistor");});
+                ui.selectable_value(component, ElectricComponent::C, "C").on_hover_ui(|ui| {ui.label("Capacitor");});
+                ui.selectable_value(component, ElectricComponent::L, "L").on_hover_ui(|ui| {ui.label("Inductor");});
+                ui.selectable_value(component, ElectricComponent::W, "W").on_hover_ui(|ui| {ui.label("Warburg");});
+                ui.selectable_value(component, ElectricComponent::Q, "Q").on_hover_ui(|ui| {ui.label("Constant phase");});
 
-                ui.selectable_value(interaction, ComponentInteraction::Change, ":");
-                ui.selectable_value(interaction, ComponentInteraction::Series, "--");
-                ui.selectable_value(interaction, ComponentInteraction::Parallel, "=");
-                ui.selectable_value(interaction, ComponentInteraction::Delete, "x");
+                ui.separator();
+
+                ui.selectable_value(interaction, ComponentInteraction::Change, ":").on_hover_ui(|ui| {ui.label("Replace");});
+                ui.selectable_value(interaction, ComponentInteraction::Series, "--").on_hover_ui(|ui| {ui.label("Add series");});
+                ui.selectable_value(interaction, ComponentInteraction::Parallel, "=").on_hover_ui(|ui| {ui.label("Add parallel");});
+                ui.selectable_value(interaction, ComponentInteraction::Delete, "x").on_hover_ui(|ui| {ui.label("Remove clicked");});
             });
 
             let blocksize = 10.;
@@ -555,7 +557,7 @@ impl epi::App for TemplateApp {
         });
         egui::SidePanel::right("rdata").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("Load").clicked() {
+                if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a dataset");}).clicked() {
                     if let Ok(files) = native_dialog::FileDialog::new()
                     .show_open_multiple_file() {
                         let vcd = files.into_iter().map(|ref f| {
@@ -578,13 +580,13 @@ impl epi::App for TemplateApp {
 
                 // ui.button("Save");
 
-                if ui.button("+").clicked() {
+                if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
                     datasets.push((vec![], "new dataset".into()));
                     for (p,m) in params.iter_mut().zip(models.iter_mut()) {
                         p.push(m.circuit.generate_new_params())
                     }
                 }
-                if ui.button("-").clicked() && datasets.len() > 1 {
+                if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
                     datasets.remove(*current_dataset);
                     for p in params.iter_mut() {
                         p.remove(*current_dataset);
@@ -706,10 +708,10 @@ impl epi::App for TemplateApp {
             });
 
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Copy").clicked() {
+                if ui.button("Copy").on_hover_ui(|ui| {ui.label("Copy the parameters from the current circuit");}).clicked() {
                     *copied_paramlist = Some((*current_circ, *current_dataset));
                 }
-                if ui.button("Paste").clicked() {
+                if ui.button("Paste").on_hover_ui(|ui| {ui.label("Replace the parameters with copied ones");}).clicked() {
                     if let Some(cp) = copied_paramlist {
                         if cp.0 == *current_circ {
                             if let Some(dpl) = params.get(cp.0).and_then(|x| x.get(cp.1)) {
@@ -742,7 +744,9 @@ impl epi::App for TemplateApp {
                                 ParameterEditability::Plural => "✔",
                                 ParameterEditability::Single => "1",
                                 ParameterEditability::Immutable => "x",
-                            }).clicked() {
+                            })
+                            .on_hover_ui(|ui| {ui.label("Feature not yet implemented");})
+                            .clicked() {
                                 *ed = match ed {
                                     ParameterEditability::Plural => ParameterEditability::Single,
                                     ParameterEditability::Single => ParameterEditability::Immutable,
@@ -756,22 +760,22 @@ impl epi::App for TemplateApp {
                             let mut smax = max.to_string();
                             let mut sval = val.to_string();
 
-                            if egui::TextEdit::singleline(&mut smin).desired_width(50.).ui(ui).changed() {
+                            if egui::TextEdit::singleline(&mut smin).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Min");}).changed() {
                                 if let Ok(new) = smin.parse::<f64>() { *min = new; }
                             }
-                            if egui::TextEdit::singleline(&mut smax).desired_width(50.).ui(ui).changed() {
+                            if egui::TextEdit::singleline(&mut smax).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Max");}).changed() {
                                 if let Ok(new) = smax.parse::<f64>() { *max = new; }
                             }
-                            if egui::TextEdit::singleline(&mut sval).desired_width(80.).ui(ui).changed() {
+                            if egui::TextEdit::singleline(&mut sval).desired_width(80.).ui(ui).on_hover_ui(|ui| {ui.label("Value");}).changed() {
                                 if let Ok(new) = sval.parse::<f64>() { *val = new; }
                             }
 
-                            if ui.small_button("<").clicked() {
+                            if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
                                 if ctx.input().modifiers.shift  { *val /= 1.01 }
                                 else if ctx.input().modifiers.command { *val /= 2.0 }
                                 else { *val /= 1.1 }
                             }
-                            if ui.small_button(">").clicked() {
+                            if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
                                 if ctx.input().modifiers.shift  { *val *= 1.01 }
                                 else if ctx.input().modifiers.command { *val *= 2.0 }
                                 else { *val *= 1.1 }
