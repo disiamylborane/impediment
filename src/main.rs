@@ -43,6 +43,7 @@ impl ParameterDesc {
 #[derive(Debug, Clone)]
 pub enum ParameterEditability { Plural, Single, Immutable }
 
+#[derive(Debug, Clone)]
 pub struct Model {
     circuit: Circuit,
     name: String,
@@ -88,6 +89,8 @@ pub struct TemplateApp {
     pub copied_paramlist: Option<(usize, usize)>,
 
     pub plot_type: PlotType,
+
+    pub fitting_response: String,
 }
 
 type AppData = (Vec<Model>, Vec<(Vec<DataPiece>, String)>, Vec< Vec< ParameterDesc >>);
@@ -310,6 +313,7 @@ impl Default for TemplateApp {
             opening_mode: (FreqOpenParam::Hz, ImpOpenParam::PlusOhm, 0, 1, 2, 0),
             copied_paramlist: None,
             plot_type: PlotType::Nyquist,
+            fitting_response: String::new(),
         };
         out.editor = dataset_to_string(&out.datasets[out.current_dataset].0);
         out
@@ -345,6 +349,7 @@ impl epi::App for TemplateApp {
             opening_mode,
             copied_paramlist,
             plot_type,
+            fitting_response,
         ..} = self;
 
         if !opening_data.is_empty() {
@@ -477,6 +482,10 @@ impl epi::App for TemplateApp {
                     );
                     models.push(newmodel);
                 };
+                if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");}).clicked() {
+                    params.push(params[*current_circ].clone());
+                    models.push(models[*current_circ].clone());
+                };
                 if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");}).clicked() && models.len() > 1 {
                     models.remove(*current_circ);
                     params.remove(*current_circ);
@@ -586,6 +595,13 @@ impl epi::App for TemplateApp {
                         p.push(m.circuit.generate_new_params())
                     }
                 }
+                if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate dataset");}).clicked() {
+                    datasets.push(datasets[*current_dataset].clone());
+                    for p in params.iter_mut() {
+                        let dc = p[*current_dataset].clone();
+                        p.push(dc)
+                    }
+                };
                 if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
                     datasets.remove(*current_dataset);
                     for p in params.iter_mut() {
@@ -693,6 +709,28 @@ impl epi::App for TemplateApp {
                     opt.set_xtol_rel(1e-10).unwrap();
 
                     let optresult = opt.optimize(&mut paramlist.vals);
+
+                    *fitting_response = match optresult {
+                        Ok((okstate, _)) => {
+                            match okstate {
+                                nlopt::SuccessState::Success => {"Fitting finished".into()}
+                                nlopt::SuccessState::FtolReached => {"Fitting finished".into()}
+                                nlopt::SuccessState::StopValReached => {"Fitting finished".into()}
+                                nlopt::SuccessState::XtolReached => {"Fitting finished".into()}
+                                nlopt::SuccessState::MaxEvalReached => {"Max evaluations reached".into()}
+                                nlopt::SuccessState::MaxTimeReached => {"Max time reached".into()}
+                            }
+                        }
+                        Err((failstate, _)) => {
+                            match failstate {
+                                nlopt::FailState::Failure => {"Fitting failure".into()}
+                                nlopt::FailState::InvalidArgs => {"The parameter values exceed the bounds".into()}
+                                nlopt::FailState::OutOfMemory => {"Memory error".into()}
+                                nlopt::FailState::RoundoffLimited => {"Roundoff limited".into()}
+                                nlopt::FailState::ForcedStop => {"Forced stop of fitting".into()}
+                            }
+                        }
+                    };
                     println!("{:?}", optresult);
                 }
 
@@ -762,25 +800,37 @@ impl epi::App for TemplateApp {
 
                             if egui::TextEdit::singleline(&mut smin).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Min");}).changed() {
                                 if let Ok(new) = smin.parse::<f64>() { *min = new; }
+                                fitting_response.clear();
                             }
                             if egui::TextEdit::singleline(&mut smax).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Max");}).changed() {
                                 if let Ok(new) = smax.parse::<f64>() { *max = new; }
+                                fitting_response.clear();
                             }
                             if egui::TextEdit::singleline(&mut sval).desired_width(80.).ui(ui).on_hover_ui(|ui| {ui.label("Value");}).changed() {
                                 if let Ok(new) = sval.parse::<f64>() { *val = new; }
+                                fitting_response.clear();
                             }
 
                             if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
                                 if ctx.input().modifiers.shift  { *val /= 1.01 }
                                 else if ctx.input().modifiers.command { *val /= 2.0 }
                                 else { *val /= 1.1 }
+                                fitting_response.clear();
                             }
                             if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
                                 if ctx.input().modifiers.shift  { *val *= 1.01 }
                                 else if ctx.input().modifiers.command { *val *= 2.0 }
                                 else { *val *= 1.1 }
+                                fitting_response.clear();
                             }
                         });
+                    }
+
+
+
+                    if !fitting_response.is_empty() {
+                        ui.separator();
+                        ui.label(&*fitting_response);
                     }
                 });
             });
