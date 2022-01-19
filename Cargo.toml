@@ -7,8 +7,8 @@ edition = "2018"
 
 [dependencies]
 
-eframe = "0.14.0"
-native-dialog = "0.5.5"
+eframe = "0.16.0"
+native-dialog = "0.6.1"
 num = "0.4.0"
 csv = "1.1.6"
 nlopt = "0.5.4"

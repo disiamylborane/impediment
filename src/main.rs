@@ -48,6 +48,7 @@ pub struct Model {
     circuit: Circuit,
     name: String,
     parameters: Vec<ParameterEditability>,
+    lock: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -135,7 +136,7 @@ impl TemplateApp {
             if let Some(name) = linestart.strip_prefix(marker) {
                 let circuit = Circuit::from_str( lines.get(1)? ).ok()?;
                 let parameters = vec![ParameterEditability::Plural; circuit.paramlen()];
-                models.push(Model{circuit, name: name.to_string(), parameters });
+                models.push(Model{circuit, name: name.to_string(), parameters, lock: true });
                 lines = &lines[2..];
             }
             else {
@@ -254,11 +255,11 @@ fn dataset_from_string(data: &str) -> Option<Vec<DataPiece>> {
         .collect()
 }
 
-/// Get the coordinates of drawing block given the coordinates of a point in a `gtk::DrawingArea`
+/// Get the coordinates of drawing block given the coordinates of a point
 fn block_by_coords(circuit: &Circuit, widsize: Vec2, clickpos: Vec2, blocksize: f32) 
     -> Option<(u16, u16)>
 {
-    // The circuit is located at the center of the DrawingArea
+    // The circuit is located at the center of the canvas
 
     // Get the circuit size
     let (i_sx, i_sy) = circuit.painted_size();
@@ -296,7 +297,8 @@ impl Default for TemplateApp {
                 Model{
                     circuit: circ, 
                     name: "model1".to_owned(), 
-                    parameters: vec![ParameterEditability::Plural, ParameterEditability::Plural, ParameterEditability::Plural]},
+                    parameters: vec![ParameterEditability::Plural, ParameterEditability::Plural, ParameterEditability::Plural],
+                    lock: false},
             ],
             datasets: vec![
                 (data, "data1".to_owned()),
@@ -334,7 +336,7 @@ impl epi::App for TemplateApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-    fn update(&mut self, ctx: &egui::CtxRef, _frame: &mut epi::Frame<'_>) {
+    fn update(&mut self, ctx: &egui::CtxRef, _frame: &epi::Frame) {
         let Self {
             fit_method, 
             component, 
@@ -422,7 +424,7 @@ impl epi::App for TemplateApp {
                           
                           let dstring = dataset_to_string(&new_dset[opening_mode.5].0);
 
-                          egui::ScrollArea::auto_sized().show(ui, |ui| {
+                          egui::ScrollArea::vertical().show(ui, |ui| {
                               ui.label(&dstring);
                           });
                         }
@@ -450,6 +452,7 @@ impl epi::App for TemplateApp {
                                         name: filename.to_string_lossy().as_ref().to_owned(),
                                         parameters: vec![ParameterEditability::Plural; circ.paramlen()],
                                         circuit: circ,
+                                        lock: true
                                     });
                                 }
                             }
@@ -473,6 +476,7 @@ impl epi::App for TemplateApp {
                         circuit: Circuit::Element(Element::Resistor),
                         name: "new model".to_string(),
                         parameters: vec![ParameterEditability::Plural],
+                        lock: false,
                     };
                     params.push(
                         vec![ParameterDesc{
@@ -518,9 +522,9 @@ impl epi::App for TemplateApp {
                 let widsize = size;
                 let size = c.circuit.painted_size();
                 let size = egui::vec2(size.0 as _, size.1 as _)*blocksize;
-                c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0);
+                c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0, if c.lock {Color32::WHITE} else {Color32::LIGHT_RED});
 
-                if response.clicked() {
+                if response.clicked() && !c.lock {
                     if let Some(pos) = response.interact_pointer_pos() {
                         let user_element = match component {
                             ElectricComponent::R => (Element::Resistor),
@@ -552,9 +556,17 @@ impl epi::App for TemplateApp {
                 }
             }
 
+            if models[*current_circ].lock {
+                if ui.small_button("Unlock").clicked() {
+                    models[*current_circ].lock = false;
+                }
+            } else {
+                ui.add_enabled(false, egui::Button::new("Unlock").small());
+            }
+
             ui.separator();
 
-            egui::ScrollArea::auto_sized().show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
                 for (i, c) in models.iter_mut().enumerate() {
                     let tedit = egui::TextEdit::singleline(&mut c.name);
                     let tedit = if *current_circ==i {tedit.text_color(Color32::RED)} else {tedit};
@@ -613,7 +625,7 @@ impl epi::App for TemplateApp {
 
             ui.separator();
 
-            egui::ScrollArea::auto_sized().show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
                 for (i, d) in datasets.iter_mut().enumerate() {
                     let tedit = egui::TextEdit::singleline(&mut d.1);
                     let tedit = if *current_dataset==i {tedit.text_color(Color32::RED)} else {tedit};
@@ -659,7 +671,9 @@ impl epi::App for TemplateApp {
 
             ui.separator();
 
-            ui.horizontal_wrapped(|ui| {
+            if ui.horizontal_wrapped(|ui| {
+                let mut lock_now = false;
+
                 if ui.button("Fit").clicked() {
                     let paramlist = &mut params[*current_circ][*current_dataset];
                     let mut opt = nlopt::Nlopt::new(
@@ -732,6 +746,8 @@ impl epi::App for TemplateApp {
                         }
                     };
                     println!("{:?}", optresult);
+
+                    lock_now = true;
                 }
 
                 egui::ComboBox::from_id_source("Select_method")
@@ -743,9 +759,15 @@ impl epi::App for TemplateApp {
                         ui.selectable_value(fit_method, FitMethod::SLSQP, "SLSQP");
                     }
                 );
-            });
 
-            ui.horizontal_wrapped(|ui| {
+                lock_now
+            }).inner {
+                models[*current_circ].lock = true;
+            }
+
+            if ui.horizontal_wrapped(|ui| {
+                let mut lock_now = false;
+
                 if ui.button("Copy").on_hover_ui(|ui| {ui.label("Copy the parameters from the current circuit");}).clicked() {
                     *copied_paramlist = Some((*current_circ, *current_dataset));
                 }
@@ -757,13 +779,18 @@ impl epi::App for TemplateApp {
                             }
                         }
                     }
+                    lock_now = true;
                 }
-            });
+                lock_now
+            }).inner {
+                models[*current_circ].lock = true;
+            }
 
-            egui::ScrollArea::auto_sized().show(ui, |ui| {
-                
-                ui.vertical(|ui| {
+            if egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.vertical(|ui|->bool {
                     use egui::Widget;
+
+                    let mut lock_now = false;
 
                     let mut empty_ed = vec![];
 
@@ -801,14 +828,17 @@ impl epi::App for TemplateApp {
                             if egui::TextEdit::singleline(&mut smin).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Min");}).changed() {
                                 if let Ok(new) = smin.parse::<f64>() { *min = new; }
                                 fitting_response.clear();
+                                lock_now = true;
                             }
                             if egui::TextEdit::singleline(&mut smax).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Max");}).changed() {
                                 if let Ok(new) = smax.parse::<f64>() { *max = new; }
                                 fitting_response.clear();
+                                lock_now = true;
                             }
                             if egui::TextEdit::singleline(&mut sval).desired_width(80.).ui(ui).on_hover_ui(|ui| {ui.label("Value");}).changed() {
                                 if let Ok(new) = sval.parse::<f64>() { *val = new; }
                                 fitting_response.clear();
+                                lock_now = true;
                             }
 
                             if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
@@ -816,24 +846,28 @@ impl epi::App for TemplateApp {
                                 else if ctx.input().modifiers.command { *val /= 2.0 }
                                 else { *val /= 1.1 }
                                 fitting_response.clear();
+                                lock_now = true;
                             }
                             if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
                                 if ctx.input().modifiers.shift  { *val *= 1.01 }
                                 else if ctx.input().modifiers.command { *val *= 2.0 }
                                 else { *val *= 1.1 }
                                 fitting_response.clear();
+                                lock_now = true;
                             }
                         });
                     }
-
-
 
                     if !fitting_response.is_empty() {
                         ui.separator();
                         ui.label(&*fitting_response);
                     }
-                });
-            });
+
+                    lock_now
+                })
+            }).inner {
+                models[*current_circ].lock = true;
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -857,20 +891,20 @@ impl epi::App for TemplateApp {
                     }
                 );
 
-                let plt = egui::plot::Plot::new("plot1")
-                    .points(egui::plot::Points::new(
-                        egui::plot::Values::from_values( dataset.iter().map(|d| 
+                let points_dataset = egui::plot::Points::new(
+                        egui::plot::Values::from_values(
+                            dataset.iter().map(|d| 
                                 match plot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
-                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg()*180.0/3.1415926),
+                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg()*180.0/std::f64::consts::PI),
                                     PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
                                 }
-                            ).collect::<Vec<_>>() )
+                            ).collect::<Vec<_>>() 
                         )
-                        .shape(egui::plot::MarkerShape::Circle)
-                        .radius(4.)
-                    );
-
+                    )
+                    .shape(egui::plot::MarkerShape::Circle)
+                    .radius(4.);
+                
                 let dlen = dataset.len();
 
                 let rmin;
@@ -886,37 +920,37 @@ impl epi::App for TemplateApp {
                     rmax = 1000.0;
                 }
 
-                let plt = if let Some(m) = models.get(*current_circ) {
-                    let values = geomspace(rmin, rmax, 1000).map(
-                        |f| {
-                        //let f = rmin + ((rmax - rmin)/1000.0 * i as f64);
-                        let imp = m.circuit.impedance(std::f64::consts::TAU*f, &params[*current_circ][*current_dataset].vals);
-                        match plot_type {
-                            PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                            PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg()*180.0/3.1415926),
-                            PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
-                        }
-                    }).collect();
-                    plt.line(egui::plot::Line::new(egui::plot::Values::from_values(values)).stroke((0.5, Color32::WHITE)))
-                } else {plt};
-
-                let plt = if let Some(m) = models.get(*current_circ) {
-                    let values = 
-                    dataset.iter().map(|d| {
-                        let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &params[*current_circ][*current_dataset].vals);
-                        match plot_type {
-                            PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                            PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg()*180.0/3.1415926),
-                            PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
-                        }
-                    }).collect();
-                    plt.points(egui::plot::Points::new(egui::plot::Values::from_values(values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.))
-                } else {plt};
-
-                let plt = plt
+                let plt = egui::plot::Plot::new("plot1")
                     .width(ui.available_width())
                     .height(ui.available_height()/2.0);
-                ui.add(plt);
+
+                plt.show(ui, |plot_ui| {
+                    plot_ui.points(points_dataset);
+
+                    if let Some(m) = models.get(*current_circ) {
+                        let line_values: Vec<egui::widgets::plot::Value> = geomspace(rmin, rmax, 1000).map(
+                            |f| {
+                            let imp = m.circuit.impedance(std::f64::consts::TAU*f, &params[*current_circ][*current_dataset].vals);
+                            match plot_type {
+                                PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                                PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg()*180.0/std::f64::consts::PI),
+                                PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
+                            }
+                        }).collect();
+                        plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values.clone())).stroke((0.5, Color32::WHITE)));
+
+                        let data_values = 
+                        dataset.iter().map(|d| {
+                            let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &params[*current_circ][*current_dataset].vals);
+                            match plot_type {
+                                PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                                PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg()*180.0/std::f64::consts::PI),
+                                PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
+                            }
+                        }).collect();
+                        plot_ui.points(egui::plot::Points::new(egui::plot::Values::from_values(data_values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.));
+                    }
+                });
 
                 ui.label(match plot_type{
                     PlotType::Nyquist => "-Im Z vs Re Z",
@@ -924,7 +958,7 @@ impl epi::App for TemplateApp {
                     PlotType::BodePhase => "arg Z vs lg freq",
                 });
 
-                egui::ScrollArea::auto_sized().show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
                     let edit = egui::TextEdit::multiline(editor)
                             .desired_rows(20)
                             .ui(ui);

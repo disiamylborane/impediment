@@ -21,7 +21,7 @@ own set of parameters.
 
 Click a textbox in circuit editor to select a circuit. It highlights with red.
 
-Click a textbox in dataset editor to select a circuit. It also highlights with red.
+Click a textbox in dataset editor to select a dataset. It also highlights with red.
 
 The circuits and datasets may be renamed in-place.
 

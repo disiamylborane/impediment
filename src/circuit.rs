@@ -171,8 +171,8 @@ fn parallel_index_by_block(parallel: &[Circuit], block: (u16, u16)) -> ParallelB
 
 
 /// Paint a sign under the element
-fn sign_element(ctx: &eframe::egui::Painter, text: &str, pos: Pos2, blocksize: f32) {
-    ctx.text(pos+vec2(blocksize, blocksize*3./2.), eframe::egui::Align2::CENTER_CENTER, text, eframe::egui::TextStyle::Body, Color32::WHITE);
+fn sign_element(ctx: &eframe::egui::Painter, text: &str, pos: Pos2, blocksize: f32, color: Color32) {
+    ctx.text(pos+vec2(blocksize, blocksize*3./2.), eframe::egui::Align2::CENTER_CENTER, text, eframe::egui::TextStyle::Body, color);
 }
 
 
@@ -244,14 +244,14 @@ impl Circuit {
         }
     }
 
-    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize)->usize {
-        let stroke = Stroke::new(1., Color32::WHITE);
+    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32)->usize {
+        let stroke = Stroke::new(1., color);
         match self {
             Circuit::Element(Element::Resistor) => {
                 painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize/4., blocksize/2.)], stroke);
                 painter.rect_stroke(Rect::from_min_size(pos+vec2(blocksize/4., blocksize/4.), vec2(blocksize*3./2., blocksize/2.)), 0., stroke);
                 painter.line_segment([pos+vec2(blocksize*7./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
-                sign_element(painter, &format!("R{}", start_index), pos, blocksize);
+                sign_element(painter, &format!("R{}", start_index), pos, blocksize, color);
                 start_index+1
             }
             Circuit::Element(Element::Capacitor) => {
@@ -259,7 +259,7 @@ impl Circuit {
                 painter.line_segment([pos+vec2(blocksize*3./4., 0.), pos+vec2(blocksize*3./4., blocksize)], stroke);
                 painter.line_segment([pos+vec2(blocksize*5./4., 0.), pos+vec2(blocksize*5./4., blocksize)], stroke);
                 painter.line_segment([pos+vec2(blocksize*5./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
-                sign_element(painter, &format!("C{}", start_index), pos, blocksize);
+                sign_element(painter, &format!("C{}", start_index), pos, blocksize, color);
                 start_index+1
             },
             Circuit::Element(Element::Inductor) => {
@@ -282,7 +282,7 @@ impl Circuit {
                 lineto(vec2(blocksize*21./12., blocksize/2.));
                 lineto(vec2(blocksize*2., blocksize/2.));
 
-                sign_element(painter, &format!("L{}", start_index), pos, blocksize);
+                sign_element(painter, &format!("L{}", start_index), pos, blocksize, color);
                 start_index+1
             }
 
@@ -297,7 +297,7 @@ impl Circuit {
                 line(vec2(1.25, 0.5), vec2(1.5, 1.0));
                 line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                sign_element(painter, &format!("W{}", start_index), pos, blocksize);
+                sign_element(painter, &format!("W{}", start_index), pos, blocksize, color);
                 start_index+1
             }
 
@@ -313,16 +313,16 @@ impl Circuit {
                 line(vec2(1.25, 0.5), vec2(1.5, 1.0));
                 line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                sign_element(painter, &format!("Z{}", start_index), pos, blocksize);
+                sign_element(painter, &format!("Z{}", start_index), pos, blocksize, color);
                 start_index+1
             }
 
             Circuit::Series(elems) => {
-                let mut index = elems[0].paint(pos, blocksize, painter, start_index);
+                let mut index = elems[0].paint(pos, blocksize, painter, start_index, color);
                 let mut pos = pos + vec2(elems[0].painted_size().0 as f32 * blocksize, 0.);
 
                 for c in elems[1..].iter() {
-                    index = c.paint(pos, blocksize, painter, index);
+                    index = c.paint(pos, blocksize, painter, index, color);
                     pos += vec2(c.painted_size().0 as f32 * blocksize, 0.);
                 }
                 index
@@ -342,14 +342,14 @@ impl Circuit {
                     let elemblock = (xsize-2-psize)/2 + 1;
                     let elemstart = (elemblock as f32).mul_add(blocksize, pos.x);
                     let elemend = (psize as f32).mul_add(blocksize, elemstart);
-                    index = c.paint(pos2(elemstart, y), blocksize, painter, index);
+                    index = c.paint(pos2(elemstart, y), blocksize, painter, index, color);
 
-                    painter.line_segment([pos2(pos.x + blocksize/2., y+blocksize/2.), pos2(elemstart, y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
-                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2((xsize as f32).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
+                    painter.line_segment([pos2(pos.x + blocksize/2., y+blocksize/2.), pos2(elemstart, y+blocksize/2.)], stroke);
+                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2((xsize as f32).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], stroke);
 
-                    painter.line_segment([pos+vec2(blocksize/2., blocksize/2.), pos2(pos.x + blocksize/2., y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
+                    painter.line_segment([pos+vec2(blocksize/2., blocksize/2.), pos2(pos.x + blocksize/2., y+blocksize/2.)], stroke);
 
-                    painter.line_segment([pos2(drawend - blocksize/2., pos.y+blocksize/2.), pos2(drawend - blocksize/2., y+blocksize/2.)], Stroke{color: Color32::WHITE, ..stroke});
+                    painter.line_segment([pos2(drawend - blocksize/2., pos.y+blocksize/2.), pos2(drawend - blocksize/2., y+blocksize/2.)], stroke);
                     
                     y += c.painted_size().1 as f32 * blocksize;
                 }
