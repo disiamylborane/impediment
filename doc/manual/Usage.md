@@ -1,8 +1,8 @@
-# Basic structure
+# General
 
 The impediment's project consists of a list of _Circuits_ and a list of
-_Datasets_.Circuit is represented by a number of passive elements connected
-in series-parallel. Dataset is a number of points "frequency-impedance" to
+_Datasets_. Circuit is represented by a number of passive elements connected
+in series and/or parallel. Dataset is a number of points "frequency-impedance" to
 be (normally) fitted to. The circuit provides a few parameters to be adjusted
 according to the electrical components. Each pair of circuit-dataset has its
 own set of parameters.
@@ -17,63 +17,75 @@ own set of parameters.
 
 ![Application GUI Image](uinterface.png)
 
-## Circuit and dataset selection
+## Circuit and dataset box
 
-Click a textbox in circuit editor to select a circuit. It highlights with red.
+The circuit box and dataset box display all the loaded circuit models and datasets.
 
-Click a textbox in dataset editor to select a dataset. It also highlights with red.
-
-The circuits and datasets may be renamed in-place.
+- Click a textbox in circuit editor to select a circuit. It highlights with red.
+- Click a textbox in dataset editor to select a dataset. It also highlights with red.
+- The circuits and datasets may be renamed in-place.
 
 ## Plot graph
 
-Drag or scroll to navigate.
+The graph displays the selected dataset (red circles) and the simulated
+impedance spectrum from the selected circuit (white line and circles).
+Nyquist and Bode diagrams may be selected for plotting.
 
-Ctrl-scroll to zoom.
-
-Double click to reset limits.
+- Drag or scroll to navigate.
+- Ctrl-scroll to zoom.
+- Double click to reset the axes bounds.
 
 ## Circuit editor
 
-Click "+" button to add a new circuit.
+The top part is related to circuit management:
 
-Click "-" button to delete the current circuit.
+- Click "Load" button to load a circuit from file (internal format).
+- Click "Save" button to save a circuit to file (same internal format). 
+  Only a single circuit with no parameter values is saved.
+- Click "+" button to add a new circuit (a single resistor to start with).
+- Click "D" button to duplicate the current circuit, including all its parameters.
+- Click "-" button to delete the current circuit.
 
-Press Load and Save button to load a new circuit from or save the current circuit to file.
-Only a single circuit with no parameter values is saved.
+The bottom part is related to circuit editing. The editable circuit are painted with
+pink. Any change of a circuit's parameter locks the circuit from editing. The locked
+circuit is painted with white.
 
-To edit the circuit elements:
-
-* Click the _action_ button to choose either replace element [:], remove element
+- Click the _action_ button to choose either replace element [:], remove element
  [x], or add the element in series[--]/parallel[=].
-* Choose the appropriate _element_, if needed: [R] Resistor, [C] Capacitor,
+- Choose the appropriate _element_, if needed: [R] Resistor, [C] Capacitor,
 [W] Warburg element, [L] Inductor, [Q] Constant phase.
-* Click the element on _circuit graph_.
+- Click the element on circuit graph.
+
+## Dataset box
+
+The dataset box is a dataset management toolkit.
+
+- Click "Load" button to load a circuit from CSV file, see [CSV loading](#csv-loading).
+- Click "+" button to add a new empty dataset.
+- Click "D" button to duplicate the current dataset, including all the parameters
+  between circuits and the dataset.
+- Click "-" button to delete the current dataset.
 
 ## Dataset editor
 
-Click "+" button to add a new empty dataset.
+The dataset may be edited in a _dataset editor_. The values are stored
+in the format of {Frequency, Hz}: {Re Z} + {Im Z}i, such as:
 
-Click "-" button to delete the current dataset.
+`100000: 30 - 25i` - means a point with the frequency of 100 kHz having the
+impedance of (30 - 25i) ohms.
 
-The dataset may be edited in a _data editor_. The values are stored
-in the format of {Frequency, Hz}: {Re Z} + {Im Z}i.
-
-Click "Load" button to create a new dataset from CSV file.
-
-The data graph shows the Niquist plot of the data and the fitting curve.
-Drag the circuit graph to move it, Ctrl+scroll to scale it, double click to reset.
+The dataset is updated on the click outside the data editor.
 
 ## Parameter editor
 
-The parameters are listed in _parameter box_.
+The parameters are listed in _parameter editor_.
 
 All the parameters contain min and max bounds (used by fitting routines) and
 the parameter value itself.
 
 When the parameter values are edited, the plots are immediately updated. One
 can use "<" and ">" buttons to increase or decrease the parameter value
-logatithmically. Alt-click for slower, Ctrl-click for faster edit.
+logatithmically. Shift-click for slower, Ctrl-click for faster edit.
 
 Click "Fit" button to perform a fitting routine with the selected method.
 
