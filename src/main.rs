@@ -30,12 +30,65 @@ pub struct ParameterDesc {
     pub bounds : Vec<(f64, f64)>
 }
 
+#[derive(Debug, Clone)]
+pub struct StringParameterDesc {
+    pub vals : Vec<String>,
+    pub bounds : Vec<(String, String)>
+}
+
+impl From<ParameterDesc> for StringParameterDesc {
+    fn from(v: ParameterDesc) -> StringParameterDesc {
+        StringParameterDesc{
+            vals: v.vals.into_iter().map(|x| x.to_string()).collect(),
+            bounds: v.bounds.into_iter().map(|(a,b)| (a.to_string(), b.to_string())).collect(), 
+        }
+    }
+}
+
+impl TryFrom<&StringParameterDesc> for ParameterDesc {
+    type Error = ();
+    fn try_from(v: &StringParameterDesc) -> Result<ParameterDesc, ()> {
+        Ok(
+            ParameterDesc {
+                vals: v.vals.iter().map(|x| x.parse::<f64>().ok()).collect::<Option<Vec<f64>>>().ok_or(())?,
+                bounds: v.bounds.iter().map(|(a,b)| {
+                    let (a,b) = (a.parse::<f64>().ok(), b.parse::<f64>().ok());
+                    if let (Some(a), Some(b)) = (a, b) {
+                        return Some((a,b))
+                    }
+                    None
+                }).collect::<Option<Vec<(f64, f64)>>>().ok_or(())?, 
+            }
+        )
+    }
+}
+
+
+fn try_into_numbers(x: &Vec<Vec<StringParameterDesc>>) -> Option<Vec<Vec<ParameterDesc>>> {
+    x.into_iter().map(|ds| {
+        ds.into_iter().map(|r|->Option<ParameterDesc> {
+            r.try_into().ok()
+        }).collect::< Option<Vec<_>> >()
+    }).collect::< Option<Vec<_>> >()
+}
+
+
 impl ParameterDesc {
     pub fn insert(&mut self, index: usize, (val, bounds): (f64, (f64, f64))) {
         self.vals.insert(index, val);
         self.bounds.insert(index, bounds);
     }
     pub fn remove(&mut self, index: usize) -> (f64, (f64, f64)) {
+        (self.vals.remove(index), self.bounds.remove(index))
+    }
+}
+
+impl StringParameterDesc {
+    pub fn insert(&mut self, index: usize, (val, bounds): (f64, (f64, f64))) {
+        self.vals.insert(index, val.to_string());
+        self.bounds.insert(index, (bounds.0.to_string(), bounds.1.to_string()));
+    }
+    pub fn remove(&mut self, index: usize) -> (String, (String, String)) {
         (self.vals.remove(index), self.bounds.remove(index))
     }
 }
@@ -77,7 +130,7 @@ pub struct TemplateApp {
 
     pub models: Vec<Model>,
     pub datasets: Vec<(Vec<DataPiece>, String)>,
-    pub params: Vec< Vec< ParameterDesc > >,
+    pub str_params: Vec< Vec< StringParameterDesc > >,
 
     pub current_circ: usize,
     pub current_dataset: usize,
@@ -303,9 +356,12 @@ impl Default for TemplateApp {
             datasets: vec![
                 (data, "data1".to_owned()),
             ],
-            params: vec![
+            str_params: vec![
                 vec![
-                    ParameterDesc { vals : vec![110.,0.0000045,102.], bounds : vec![(1., 10000.),(1e-6, 1e-1),(1., 10000.0)] },
+                    StringParameterDesc {
+                        vals : vec!["110.0".into(), "4.50e-6".into(), "102.0".into()],
+                        bounds : vec![("1.0".into(), "10000".into()),("1e-6".into(), "0.1".into()),("1.0".into(), "10000".into())]
+                    },
                 ],
             ],
             current_circ: 0,
@@ -345,7 +401,7 @@ impl epi::App for TemplateApp {
             current_circ,
             current_dataset,
             datasets,
-            params,
+            str_params,
             editor,
             opening_data,
             opening_mode,
@@ -399,7 +455,7 @@ impl epi::App for TemplateApp {
                         if let Some(new_dset) = new_dset {
                           if ui.button("Load").clicked() {
                               let mut newds: Vec<(Vec<DataPiece>, String)> = new_dset.into_iter().collect();
-                              for paramset in params.iter_mut() {
+                              for paramset in str_params.iter_mut() {
                                   for _ in 0..newds.len() {
                                     paramset.push(paramset[0].clone());
                                   }
@@ -445,8 +501,8 @@ impl epi::App for TemplateApp {
                             let buf = std::io::BufReader::new(&file);
                             if let Some(Ok(line)) = buf.lines().next() {
                                 if let Ok(circ) = Circuit::from_str(&line) {
-                                    params.push(
-                                        vec![circ.generate_new_params(); datasets.len()]
+                                    str_params.push(
+                                        vec![circ.generate_new_params().into(); datasets.len()]
                                     );
                                     models.push(Model {
                                         name: filename.to_string_lossy().as_ref().to_owned(),
@@ -478,21 +534,21 @@ impl epi::App for TemplateApp {
                         parameters: vec![ParameterEditability::Plural],
                         lock: false,
                     };
-                    params.push(
-                        vec![ParameterDesc{
-                            vals: vec![10.],
-                            bounds: vec![(0.1, 100000.0)]
+                    str_params.push(
+                        vec![StringParameterDesc{
+                            vals: vec!["10.".into()],
+                            bounds: vec![("0.1".into(), "100000".into())]
                         }; datasets.len()]
                     );
                     models.push(newmodel);
                 };
                 if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");}).clicked() {
-                    params.push(params[*current_circ].clone());
+                    str_params.push(str_params[*current_circ].clone());
                     models.push(models[*current_circ].clone());
                 };
                 if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");}).clicked() && models.len() > 1 {
                     models.remove(*current_circ);
-                    params.remove(*current_circ);
+                    str_params.remove(*current_circ);
                     if *current_circ != 0 {*current_circ -= 1;}
                 };
             });
@@ -539,16 +595,16 @@ impl epi::App for TemplateApp {
                         if let Some(block) = block {
                             match interaction {
                                 ComponentInteraction::Change => {
-                                    c.circuit.replace(block, user_element, params[*current_circ].iter_mut(), &mut c.parameters)
+                                    c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters)
                                 },
                                 ComponentInteraction::Series => {
-                                    c.circuit._add_series(block, user_element, params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                    c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
                                 },
                                 ComponentInteraction::Parallel => {
-                                    c.circuit._add_parallel(block, user_element, params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                    c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
                                 }
                                 ComponentInteraction::Delete => {
-                                    c.circuit._remove(block, params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                    c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
                                 }
                             }
                         }
@@ -603,20 +659,20 @@ impl epi::App for TemplateApp {
 
                 if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
                     datasets.push((vec![], "new dataset".into()));
-                    for (p,m) in params.iter_mut().zip(models.iter_mut()) {
-                        p.push(m.circuit.generate_new_params())
+                    for (p, m) in str_params.iter_mut().zip(models.iter_mut()) {
+                        p.push(m.circuit.generate_new_params().into())
                     }
                 }
                 if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate dataset");}).clicked() {
                     datasets.push(datasets[*current_dataset].clone());
-                    for p in params.iter_mut() {
+                    for p in str_params.iter_mut() {
                         let dc = p[*current_dataset].clone();
                         p.push(dc)
                     }
                 };
                 if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
                     datasets.remove(*current_dataset);
-                    for p in params.iter_mut() {
+                    for p in str_params.iter_mut() {
                         p.remove(*current_dataset);
                     }
                     if *current_dataset > 0 {*current_dataset -= 1;}
@@ -642,11 +698,13 @@ impl epi::App for TemplateApp {
                 if ui.button("Save project").clicked() {
                     if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
                         if let Ok(mut file) = std::fs::File::create(filename) {
-                            if let Ok(string) = Self::save_to_string(models, datasets, params) {
-                                use std::io::Write;
-                                writeln!(&mut file, "{}", string).unwrap();
-                            } else {
-                                println!("Error writing to the file");
+                            if let Some(nparams) = try_into_numbers(str_params) {
+                                if let Ok(string) = Self::save_to_string(models, datasets, &nparams) {
+                                    use std::io::Write;
+                                    writeln!(&mut file, "{}", string).unwrap();
+                                } else {
+                                    println!("Error writing to the file");
+                                }
                             }
                         }
                     }
@@ -658,7 +716,7 @@ impl epi::App for TemplateApp {
                             if let Some((m, d, p)) = Self::load_from_string(&sfile) {
                                 *models = m;
                                 *datasets = d;
-                                *params = p;
+                                *str_params = p.into_iter().map(|ds| ds.into_iter().map(|x|x.into()).collect()).collect();
                                 *current_circ = 0;
                                 *current_dataset = 0;
                                 *opening_data = vec![];
@@ -675,79 +733,85 @@ impl epi::App for TemplateApp {
                 let mut lock_now = false;
 
                 if ui.button("Fit").clicked() {
-                    let paramlist = &mut params[*current_circ][*current_dataset];
-                    let mut opt = nlopt::Nlopt::new(
-                        match fit_method {
-                            FitMethod::BOBYQA => nlopt::Algorithm::Bobyqa,
-                            FitMethod::TNC => nlopt::Algorithm::TNewton,
-                            FitMethod::SLSQP => nlopt::Algorithm::Slsqp,
-                            FitMethod::LBfgsB => nlopt::Algorithm::Lbfgs,
-                        }, 
-                        paramlist.vals.len(), 
-                        |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
-                            let circ = &models[*current_circ].circuit;
-                            if let Some(gout) = &mut gradient_out {
-                                for i in 0..gout.len() {
-                                    gout[i] = 0.0;
-                                }
-                            };
-                            let exps = &datasets[*current_dataset].0;
-
-                            let mut loss = 0.0_f64;
-                            for point in exps {
-                                let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
-                                let diff = model_imp - point.imp;
-                                loss += diff.norm_sqr() / point.imp.norm_sqr();
-
+                    if let Ok(mut paramlist) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
+                        //let paramlist = &mut params[*current_circ][*current_dataset];
+                        let mut opt = nlopt::Nlopt::new(
+                            match fit_method {
+                                FitMethod::BOBYQA => nlopt::Algorithm::Bobyqa,
+                                FitMethod::TNC => nlopt::Algorithm::TNewton,
+                                FitMethod::SLSQP => nlopt::Algorithm::Slsqp,
+                                FitMethod::LBfgsB => nlopt::Algorithm::Lbfgs,
+                            }, 
+                            paramlist.vals.len(), 
+                            |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
+                                let circ = &models[*current_circ].circuit;
                                 if let Some(gout) = &mut gradient_out {
                                     for i in 0..gout.len() {
-                                        let dmdx = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
-                                        // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
-                                        let ml = (point.imp-model_imp)*dmdx.conj().re * 2.0;
-                                        gout[i] += -1.0 / point.imp.norm_sqr() * ml.re;
+                                        gout[i] = 0.0;
                                     }
                                 };
+                                let exps = &datasets[*current_dataset].0;
+    
+                                let mut loss = 0.0_f64;
+                                for point in exps {
+                                    let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
+                                    let diff = model_imp - point.imp;
+                                    loss += diff.norm_sqr() / point.imp.norm_sqr();
+    
+                                    if let Some(gout) = &mut gradient_out {
+                                        for i in 0..gout.len() {
+                                            let dmdx = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
+                                            // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
+                                            let ml = (point.imp-model_imp)*dmdx.conj().re * 2.0;
+                                            gout[i] += -1.0 / point.imp.norm_sqr() * ml.re;
+                                        }
+                                    };
+                                }
+                            
+                                loss
+                            },
+                            nlopt::Target::Minimize,
+                            (),
+                        );
+    
+                        opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
+                        opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
+                        opt.set_maxeval((-1_i32) as u32).unwrap();
+                        opt.set_maxtime(10.0).unwrap();
+    
+                        opt.set_xtol_rel(1e-10).unwrap();
+    
+                        let optresult = opt.optimize(&mut paramlist.vals);
+    
+                        *fitting_response = match optresult {
+                            Ok((okstate, _)) => {
+                                let out = match okstate {
+                                    nlopt::SuccessState::Success => {"Fitting finished".into()}
+                                    nlopt::SuccessState::FtolReached => {"Fitting finished".into()}
+                                    nlopt::SuccessState::StopValReached => {"Fitting finished".into()}
+                                    nlopt::SuccessState::XtolReached => {"Fitting finished".into()}
+                                    nlopt::SuccessState::MaxEvalReached => {"Max evaluations reached".into()}
+                                    nlopt::SuccessState::MaxTimeReached => {"Max time reached".into()}
+                                };
+
+                                str_params[*current_circ][*current_dataset] = paramlist.into();
+
+                                out
                             }
-                        
-                            loss
-                        },
-                        nlopt::Target::Minimize,
-                        (),
-                    );
-
-                    opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
-                    opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
-                    opt.set_maxeval((-1_i32) as u32).unwrap();
-                    opt.set_maxtime(10.0).unwrap();
-
-                    opt.set_xtol_rel(1e-10).unwrap();
-
-                    let optresult = opt.optimize(&mut paramlist.vals);
-
-                    *fitting_response = match optresult {
-                        Ok((okstate, _)) => {
-                            match okstate {
-                                nlopt::SuccessState::Success => {"Fitting finished".into()}
-                                nlopt::SuccessState::FtolReached => {"Fitting finished".into()}
-                                nlopt::SuccessState::StopValReached => {"Fitting finished".into()}
-                                nlopt::SuccessState::XtolReached => {"Fitting finished".into()}
-                                nlopt::SuccessState::MaxEvalReached => {"Max evaluations reached".into()}
-                                nlopt::SuccessState::MaxTimeReached => {"Max time reached".into()}
+                            Err((failstate, _)) => {
+                                match failstate {
+                                    nlopt::FailState::Failure => {"Fitting failure".into()}
+                                    nlopt::FailState::InvalidArgs => {"The parameter values exceed the bounds".into()}
+                                    nlopt::FailState::OutOfMemory => {"Memory error".into()}
+                                    nlopt::FailState::RoundoffLimited => {"Roundoff limited".into()}
+                                    nlopt::FailState::ForcedStop => {"Forced stop of fitting".into()}
+                                }
                             }
-                        }
-                        Err((failstate, _)) => {
-                            match failstate {
-                                nlopt::FailState::Failure => {"Fitting failure".into()}
-                                nlopt::FailState::InvalidArgs => {"The parameter values exceed the bounds".into()}
-                                nlopt::FailState::OutOfMemory => {"Memory error".into()}
-                                nlopt::FailState::RoundoffLimited => {"Roundoff limited".into()}
-                                nlopt::FailState::ForcedStop => {"Forced stop of fitting".into()}
-                            }
-                        }
-                    };
-                    println!("{:?}", optresult);
-
-                    lock_now = true;
+                        };
+                        println!("{:?}", optresult);
+    
+                        lock_now = true;
+                    }
                 }
 
                 egui::ComboBox::from_id_source("Select_method")
@@ -774,8 +838,8 @@ impl epi::App for TemplateApp {
                 if ui.button("Paste").on_hover_ui(|ui| {ui.label("Replace the parameters with copied ones");}).clicked() {
                     if let Some(cp) = copied_paramlist {
                         if cp.0 == *current_circ {
-                            if let Some(dpl) = params.get(cp.0).and_then(|x| x.get(cp.1)) {
-                                params[*current_circ][*current_dataset] = dpl.to_owned();
+                            if let Some(dpl) = str_params.get(cp.0).and_then(|x| x.get(cp.1)) {
+                                str_params[*current_circ][*current_dataset] = dpl.to_owned();
                             }
                         }
                     }
@@ -795,7 +859,7 @@ impl epi::App for TemplateApp {
                     let mut empty_ed = vec![];
 
                     let param_names = models.get_mut(*current_circ).map_or(vec![], |x| x.circuit.param_names());
-                    let paramlist = &mut params[*current_circ][*current_dataset];
+                    let paramlist = &mut str_params[*current_circ][*current_dataset];
                     let param_ed = models.get_mut(*current_circ).map_or(&mut empty_ed, |x| &mut x.parameters);
 
                     for (((name, val), (min, max)), ed) in 
@@ -821,37 +885,40 @@ impl epi::App for TemplateApp {
 
                             ui.label(name);
 
-                            let mut smin = min.to_string();
-                            let mut smax = max.to_string();
-                            let mut sval = val.to_string();
+                            //let mut smin = min.to_string();
+                            //let mut smax = max.to_string();
+                            //let mut sval = val.to_string();
 
-                            if egui::TextEdit::singleline(&mut smin).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Min");}).changed() {
-                                if let Ok(new) = smin.parse::<f64>() { *min = new; }
+                            if egui::TextEdit::singleline(min).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Min");}).changed() {
                                 fitting_response.clear();
                                 lock_now = true;
                             }
-                            if egui::TextEdit::singleline(&mut smax).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Max");}).changed() {
-                                if let Ok(new) = smax.parse::<f64>() { *max = new; }
+                            if egui::TextEdit::singleline(max).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Max");}).changed() {
                                 fitting_response.clear();
                                 lock_now = true;
                             }
-                            if egui::TextEdit::singleline(&mut sval).desired_width(80.).ui(ui).on_hover_ui(|ui| {ui.label("Value");}).changed() {
-                                if let Ok(new) = sval.parse::<f64>() { *val = new; }
+                            if egui::TextEdit::singleline(val).desired_width(80.).ui(ui).on_hover_ui(|ui| {ui.label("Value");}).changed() {
                                 fitting_response.clear();
                                 lock_now = true;
                             }
 
                             if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
-                                if ctx.input().modifiers.shift  { *val /= 1.01 }
-                                else if ctx.input().modifiers.command { *val /= 2.0 }
-                                else { *val /= 1.1 }
+                                if let Ok(mut nval) = val.parse::<f64>() {
+                                    if ctx.input().modifiers.shift  { nval /= 1.01 }
+                                    else if ctx.input().modifiers.command { nval /= 2.0 }
+                                    else { nval /= 1.1 }
+                                    *val = nval.to_string();
+                                }
                                 fitting_response.clear();
                                 lock_now = true;
                             }
                             if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
-                                if ctx.input().modifiers.shift  { *val *= 1.01 }
-                                else if ctx.input().modifiers.command { *val *= 2.0 }
-                                else { *val *= 1.1 }
+                                if let Ok(mut nval) = val.parse::<f64>() {
+                                    if ctx.input().modifiers.shift  { nval *= 1.01 }
+                                    else if ctx.input().modifiers.command { nval *= 2.0 }
+                                    else { nval *= 1.1 }
+                                    *val = nval.to_string();
+                                }
                                 fitting_response.clear();
                                 lock_now = true;
                             }
@@ -927,29 +994,32 @@ impl epi::App for TemplateApp {
                 plt.show(ui, |plot_ui| {
                     plot_ui.points(points_dataset);
 
-                    if let Some(m) = models.get(*current_circ) {
-                        let line_values: Vec<egui::widgets::plot::Value> = geomspace(rmin, rmax, 1000).map(
-                            |f| {
-                            let imp = m.circuit.impedance(std::f64::consts::TAU*f, &params[*current_circ][*current_dataset].vals);
-                            match plot_type {
-                                PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                                PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg()*180.0/std::f64::consts::PI),
-                                PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
-                            }
-                        }).collect();
-                        plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values.clone())).stroke((0.5, Color32::WHITE)));
-
-                        let data_values = 
-                        dataset.iter().map(|d| {
-                            let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &params[*current_circ][*current_dataset].vals);
-                            match plot_type {
-                                PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                                PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg()*180.0/std::f64::consts::PI),
-                                PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
-                            }
-                        }).collect();
-                        plot_ui.points(egui::plot::Points::new(egui::plot::Values::from_values(data_values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.));
+                    if let Ok(cparams) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
+                        if let Some(m) = models.get(*current_circ) {
+                            let line_values: Vec<egui::widgets::plot::Value> = geomspace(rmin, rmax, 1000).map(
+                                |f| {
+                                let imp = m.circuit.impedance(std::f64::consts::TAU*f, &cparams.vals);
+                                match plot_type {
+                                    PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                                    PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg()*180.0/std::f64::consts::PI),
+                                    PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
+                                }
+                            }).collect();
+                            plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values.clone())).stroke((0.5, Color32::WHITE)));
+    
+                            let data_values = 
+                            dataset.iter().map(|d| {
+                                let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &cparams.vals);
+                                match plot_type {
+                                    PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg()*180.0/std::f64::consts::PI),
+                                    PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
+                                }
+                            }).collect();
+                            plot_ui.points(egui::plot::Points::new(egui::plot::Values::from_values(data_values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.));
+                        }
                     }
+
                 });
 
                 ui.label(match plot_type{

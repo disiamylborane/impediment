@@ -3,7 +3,7 @@ extern crate num;
 use std::{f64::consts::PI, vec};
 use eframe::egui::{Color32, Pos2, Rect, Stroke, pos2, vec2};
 
-use crate::{Cplx, ParameterDesc, ParameterEditability};
+use crate::{Cplx, ParameterDesc, StringParameterDesc, ParameterEditability};
 
 const I: Cplx = Cplx{ re: 0.0, im: 1.0 };
 
@@ -17,7 +17,7 @@ pub enum Element {
 }
 
 impl Element {
-    fn exchange_param<'a>(self, element: Self, idx: usize, paramlist: impl Iterator<Item = &'a mut ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+    fn exchange_param<'a>(self, element: Self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
             match self {
                 Element::Resistor => {pdesc.remove(idx);},
@@ -58,7 +58,7 @@ impl Element {
             }
         }
     }
-    fn remove_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+    fn remove_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
                 match self {
                 Element::Resistor => {pdesc.remove(idx);},
@@ -79,7 +79,7 @@ impl Element {
             }
         };
     }
-    fn insert_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+    fn insert_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
             match self {
                 Element::Resistor => {pdesc.insert(idx, (100., (1., 100000.)))},
@@ -480,7 +480,7 @@ impl Circuit {
     pub fn _replace<'a>(&mut self, 
                 coord: (u16, u16), 
                 element: Element, 
-                paramlist: impl Iterator<Item = &'a mut ParameterDesc>, 
+                paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, 
                 param_idx: usize,
                 editability: &mut Vec<ParameterEditability>) {
         match self {
@@ -519,11 +519,11 @@ impl Circuit {
         }
     }
  
-    pub fn replace(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, ParameterDesc>, editability: &mut Vec<ParameterEditability>) {
+    pub fn replace(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         self._replace(coord, element, paramlist, 0, editability)
     }
 
-    pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, ParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
+    pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
         match self {
             Circuit::Element(e) => {
                 let new = Self::Series(vec![Self::Element(*e), Self::Element(element)]);
@@ -559,7 +559,7 @@ impl Circuit {
         }
     }
 
-    pub fn _add_parallel(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, ParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
+    pub fn _add_parallel(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
         match self {
             Self::Element(e) => {
                 let new = Self::Parallel(vec![Self::Element(*e), Self::Element(element)]);
@@ -596,7 +596,7 @@ impl Circuit {
     }
 
 
-    pub fn _remove(&mut self, coord: (u16, u16), paramlist: std::slice::IterMut<'_, ParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>) {
+    pub fn _remove(&mut self, coord: (u16, u16), paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>) {
         match self {
             Circuit::Element(_) => {},
 

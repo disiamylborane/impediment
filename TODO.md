@@ -1,15 +1,33 @@
 # A TODO list for impediment
 
-- [ ] Fix the manual number editing in textboxes
+Past:
+
+- [x] Fix the manual number editing in textboxes
 - [x] Duplicate model/dataset
 - [x] Implement the tooltips
+- [x] Lock circuit when fitted
+
+Fix:
+
+- [ ] Inspect save option for wrong parameter data
+- [ ] Custom plot labels
+
+Minor features:
+
 - [.] Show the result of optimization routines, highlight InvalidArgs
-- [ ] Custom, more flexible plot
-- [ ] Implement the mutiple-data fitting feature
-- [ ] Undo buffer
 - [ ] Textbox scalability (min/max/val)
-- [ ] Reset plot when changing plot type
+- [ ] Different types of data representation in data textbox
+
+Major features for 1.0:
+
+- [ ] Undo buffer
+- [ ] Implement the mutiple-data fitting feature
+
+Further:
+
 - [ ] Quick data generation
 - [ ] Statistical analysis
-- [ ] Different types of data representation in data textbox
-- [ ] Lock circuit when fitted
+- [ ] Custom, more flexible plot
+
+Discarded:
+- Reset plot when changing plot type
