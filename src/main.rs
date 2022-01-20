@@ -1,11 +1,13 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::pedantic)]
 
+use float_pretty_print::PrettyPrintFloat;
+
 use std::{fmt::Display, str::FromStr};
 
 use circuit::Circuit;
 use data::DataPiece;
-use eframe::{egui::{self, Color32, Vec2, vec2}, epi};
+use eframe::{egui::{self, Color32, Vec2, vec2, plot::Value}, epi};
 
 use crate::circuit::Element;
 
@@ -39,8 +41,8 @@ pub struct StringParameterDesc {
 impl From<ParameterDesc> for StringParameterDesc {
     fn from(v: ParameterDesc) -> StringParameterDesc {
         StringParameterDesc{
-            vals: v.vals.into_iter().map(|x| x.to_string()).collect(),
-            bounds: v.bounds.into_iter().map(|(a,b)| (a.to_string(), b.to_string())).collect(), 
+            vals: v.vals.into_iter().map(|x| format!("{}", PrettyPrintFloat(x))).collect(),
+            bounds: v.bounds.into_iter().map(|(a,b)| (format!("{}", PrettyPrintFloat(a)), format!("{}", PrettyPrintFloat(b)))).collect(), 
         }
     }
 }
@@ -85,8 +87,8 @@ impl ParameterDesc {
 
 impl StringParameterDesc {
     pub fn insert(&mut self, index: usize, (val, bounds): (f64, (f64, f64))) {
-        self.vals.insert(index, val.to_string());
-        self.bounds.insert(index, (bounds.0.to_string(), bounds.1.to_string()));
+        self.vals.insert(index, format!("{}", PrettyPrintFloat(val)));
+        self.bounds.insert(index, (format!("{}", PrettyPrintFloat(bounds.0)), format!("{}", PrettyPrintFloat(bounds.1))));
     }
     pub fn remove(&mut self, index: usize) -> (String, (String, String)) {
         (self.vals.remove(index), self.bounds.remove(index))
@@ -121,6 +123,7 @@ impl Display for ImpOpenParam {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum PlotType {Nyquist, BodePhase, BodeAmp}
 
 pub struct TemplateApp {
@@ -144,7 +147,7 @@ pub struct TemplateApp {
 
     pub plot_type: PlotType,
 
-    pub fitting_response: String,
+    pub text_status: String,
 }
 
 type AppData = (Vec<Model>, Vec<(Vec<DataPiece>, String)>, Vec< Vec< ParameterDesc >>);
@@ -371,7 +374,7 @@ impl Default for TemplateApp {
             opening_mode: (FreqOpenParam::Hz, ImpOpenParam::PlusOhm, 0, 1, 2, 0),
             copied_paramlist: None,
             plot_type: PlotType::Nyquist,
-            fitting_response: String::new(),
+            text_status: String::new(),
         };
         out.editor = dataset_to_string(&out.datasets[out.current_dataset].0);
         out
@@ -407,7 +410,7 @@ impl epi::App for TemplateApp {
             opening_mode,
             copied_paramlist,
             plot_type,
-            fitting_response,
+            text_status,
         ..} = self;
 
         if !opening_data.is_empty() {
@@ -493,212 +496,216 @@ impl epi::App for TemplateApp {
         }
 
         egui::SidePanel::left("models").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a circuit");}).clicked() {
-                    if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_open_single_file() {
-                        if let Ok(file) = std::fs::File::open(filename.clone()) {
-                            use std::io::BufRead;
-                            let buf = std::io::BufReader::new(&file);
-                            if let Some(Ok(line)) = buf.lines().next() {
-                                if let Ok(circ) = Circuit::from_str(&line) {
-                                    str_params.push(
-                                        vec![circ.generate_new_params().into(); datasets.len()]
-                                    );
-                                    models.push(Model {
-                                        name: filename.to_string_lossy().as_ref().to_owned(),
-                                        parameters: vec![ParameterEditability::Plural; circ.paramlen()],
-                                        circuit: circ,
-                                        lock: true
-                                    });
+            ui.vertical_centered_justified( |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a circuit");}).clicked() {
+                        if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_open_single_file() {
+                            if let Ok(file) = std::fs::File::open(filename.clone()) {
+                                use std::io::BufRead;
+                                let buf = std::io::BufReader::new(&file);
+                                if let Some(Ok(line)) = buf.lines().next() {
+                                    if let Ok(circ) = Circuit::from_str(&line) {
+                                        str_params.push(
+                                            vec![circ.generate_new_params().into(); datasets.len()]
+                                        );
+                                        models.push(Model {
+                                            name: filename.to_string_lossy().as_ref().to_owned(),
+                                            parameters: vec![ParameterEditability::Plural; circ.paramlen()],
+                                            circuit: circ,
+                                            lock: true
+                                        });
+                                    }
                                 }
                             }
                         }
                     }
-                }
-
-                if ui.button("Save").on_hover_ui(|ui| {ui.label("Save current circuit");}).clicked() {
-                    if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
-                        if let Ok(mut file) = std::fs::File::create(filename) {
-                            if let Some(mdl) = models.get(*current_circ) {
-                                use std::io::Write;
-                                writeln!(&mut file, "{}", mdl.circuit).unwrap();
+    
+                    if ui.button("Save").on_hover_ui(|ui| {ui.label("Save current circuit");}).clicked() {
+                        if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
+                            if let Ok(mut file) = std::fs::File::create(filename) {
+                                if let Some(mdl) = models.get(*current_circ) {
+                                    use std::io::Write;
+                                    writeln!(&mut file, "{}", mdl.circuit).unwrap();
+                                }
                             }
                         }
                     }
-                }
-
-                if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");}).clicked() {
-                    let newmodel = Model {
-                        circuit: Circuit::Element(Element::Resistor),
-                        name: "new model".to_string(),
-                        parameters: vec![ParameterEditability::Plural],
-                        lock: false,
-                    };
-                    str_params.push(
-                        vec![StringParameterDesc{
-                            vals: vec!["10.".into()],
-                            bounds: vec![("0.1".into(), "100000".into())]
-                        }; datasets.len()]
-                    );
-                    models.push(newmodel);
-                };
-                if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");}).clicked() {
-                    str_params.push(str_params[*current_circ].clone());
-                    models.push(models[*current_circ].clone());
-                };
-                if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");}).clicked() && models.len() > 1 {
-                    models.remove(*current_circ);
-                    str_params.remove(*current_circ);
-                    if *current_circ != 0 {*current_circ -= 1;}
-                };
-            });
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.selectable_value(component, ElectricComponent::R, "R").on_hover_ui(|ui| {ui.label("Resistor");});
-                ui.selectable_value(component, ElectricComponent::C, "C").on_hover_ui(|ui| {ui.label("Capacitor");});
-                ui.selectable_value(component, ElectricComponent::L, "L").on_hover_ui(|ui| {ui.label("Inductor");});
-                ui.selectable_value(component, ElectricComponent::W, "W").on_hover_ui(|ui| {ui.label("Warburg");});
-                ui.selectable_value(component, ElectricComponent::Q, "Q").on_hover_ui(|ui| {ui.label("Constant phase");});
-
-                ui.separator();
-
-                ui.selectable_value(interaction, ComponentInteraction::Change, ":").on_hover_ui(|ui| {ui.label("Replace");});
-                ui.selectable_value(interaction, ComponentInteraction::Series, "--").on_hover_ui(|ui| {ui.label("Add series");});
-                ui.selectable_value(interaction, ComponentInteraction::Parallel, "=").on_hover_ui(|ui| {ui.label("Add parallel");});
-                ui.selectable_value(interaction, ComponentInteraction::Delete, "x").on_hover_ui(|ui| {ui.label("Remove clicked");});
-            });
-
-            let blocksize = 10.;
-            let size = egui::vec2(200.0, 100.0);
-            let (response, painter) = ui.allocate_painter(size, egui::Sense::click());
-            painter.rect_filled(response.rect, 0., Color32::from_rgb(80, 80, 80));
-            if let Some(c) = models.get_mut(*current_circ) {
-                let widsize = size;
-                let size = c.circuit.painted_size();
-                let size = egui::vec2(size.0 as _, size.1 as _)*blocksize;
-                c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0, if c.lock {Color32::WHITE} else {Color32::LIGHT_RED});
-
-                if response.clicked() && !c.lock {
-                    if let Some(pos) = response.interact_pointer_pos() {
-                        let user_element = match component {
-                            ElectricComponent::R => (Element::Resistor),
-                            ElectricComponent::C => (Element::Capacitor),
-                            ElectricComponent::W => (Element::Warburg),
-                            ElectricComponent::L => (Element::Inductor),
-                            ElectricComponent::Q => (Element::Cpe),
+    
+                    if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");}).clicked() {
+                        let newmodel = Model {
+                            circuit: Circuit::Element(Element::Resistor),
+                            name: "new model".to_string(),
+                            parameters: vec![ParameterEditability::Plural],
+                            lock: false,
                         };
-
-                        let canvas_pos = pos - response.rect.min;
-                        let block = block_by_coords(&c.circuit, widsize, canvas_pos, blocksize);
-                        if let Some(block) = block {
-                            match interaction {
-                                ComponentInteraction::Change => {
-                                    c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters)
-                                },
-                                ComponentInteraction::Series => {
-                                    c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
-                                },
-                                ComponentInteraction::Parallel => {
-                                    c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
-                                }
-                                ComponentInteraction::Delete => {
-                                    c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                        str_params.push(
+                            vec![StringParameterDesc{
+                                vals: vec!["10.".into()],
+                                bounds: vec![("0.1".into(), "100000".into())]
+                            }; datasets.len()]
+                        );
+                        models.push(newmodel);
+                    };
+                    if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");}).clicked() {
+                        str_params.push(str_params[*current_circ].clone());
+                        models.push(models[*current_circ].clone());
+                    };
+                    if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");}).clicked() && models.len() > 1 {
+                        models.remove(*current_circ);
+                        str_params.remove(*current_circ);
+                        if *current_circ != 0 {*current_circ -= 1;}
+                    };
+                });
+    
+                ui.separator();
+    
+                ui.horizontal(|ui| {
+                    ui.selectable_value(component, ElectricComponent::R, "R").on_hover_ui(|ui| {ui.label("Resistor");});
+                    ui.selectable_value(component, ElectricComponent::C, "C").on_hover_ui(|ui| {ui.label("Capacitor");});
+                    ui.selectable_value(component, ElectricComponent::L, "L").on_hover_ui(|ui| {ui.label("Inductor");});
+                    ui.selectable_value(component, ElectricComponent::W, "W").on_hover_ui(|ui| {ui.label("Warburg");});
+                    ui.selectable_value(component, ElectricComponent::Q, "Q").on_hover_ui(|ui| {ui.label("Constant phase");});
+    
+                    ui.separator();
+    
+                    ui.selectable_value(interaction, ComponentInteraction::Change, ":").on_hover_ui(|ui| {ui.label("Replace");});
+                    ui.selectable_value(interaction, ComponentInteraction::Series, "--").on_hover_ui(|ui| {ui.label("Add series");});
+                    ui.selectable_value(interaction, ComponentInteraction::Parallel, "=").on_hover_ui(|ui| {ui.label("Add parallel");});
+                    ui.selectable_value(interaction, ComponentInteraction::Delete, "x").on_hover_ui(|ui| {ui.label("Remove clicked");});
+                });
+    
+                let blocksize = 10.;
+                let size = egui::vec2(200.0, 100.0);
+                let (response, painter) = ui.allocate_painter(size, egui::Sense::click());
+                painter.rect_filled(response.rect, 0., Color32::from_rgb(80, 80, 80));
+                if let Some(c) = models.get_mut(*current_circ) {
+                    let widsize = size;
+                    let size = c.circuit.painted_size();
+                    let size = egui::vec2(size.0 as _, size.1 as _)*blocksize;
+                    c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0, if c.lock {Color32::WHITE} else {Color32::LIGHT_RED});
+    
+                    if response.clicked() && !c.lock {
+                        if let Some(pos) = response.interact_pointer_pos() {
+                            let user_element = match component {
+                                ElectricComponent::R => (Element::Resistor),
+                                ElectricComponent::C => (Element::Capacitor),
+                                ElectricComponent::W => (Element::Warburg),
+                                ElectricComponent::L => (Element::Inductor),
+                                ElectricComponent::Q => (Element::Cpe),
+                            };
+    
+                            let canvas_pos = pos - response.rect.min;
+                            let block = block_by_coords(&c.circuit, widsize, canvas_pos, blocksize);
+                            if let Some(block) = block {
+                                match interaction {
+                                    ComponentInteraction::Change => {
+                                        c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters)
+                                    },
+                                    ComponentInteraction::Series => {
+                                        c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                    },
+                                    ComponentInteraction::Parallel => {
+                                        c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                    }
+                                    ComponentInteraction::Delete => {
+                                        c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-
-            if models[*current_circ].lock {
-                if ui.small_button("Unlock").clicked() {
-                    models[*current_circ].lock = false;
+    
+                if models[*current_circ].lock {
+                    if ui.small_button("Unlock").clicked() {
+                        models[*current_circ].lock = false;
+                    }
+                } else {
+                    ui.add_enabled(false, egui::Button::new("Unlock").small());
                 }
-            } else {
-                ui.add_enabled(false, egui::Button::new("Unlock").small());
-            }
-
-            ui.separator();
-
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (i, c) in models.iter_mut().enumerate() {
-                    let tedit = egui::TextEdit::singleline(&mut c.name);
-                    let tedit = if *current_circ==i {tedit.text_color(Color32::RED)} else {tedit};
-                    if ui.add(tedit).clicked() {
-                        *current_circ=i;
-                    };
-                }
+    
+                ui.separator();
+    
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (i, c) in models.iter_mut().enumerate() {
+                        let tedit = egui::TextEdit::singleline(&mut c.name);
+                        let tedit = if *current_circ==i {tedit.text_color(Color32::RED)} else {tedit};
+                        if ui.add(tedit).clicked() {
+                            *current_circ=i;
+                        };
+                    }
+                });
             });
         });
         egui::SidePanel::right("rdata").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a dataset");}).clicked() {
-                    if let Ok(files) = native_dialog::FileDialog::new()
-                    .show_open_multiple_file() {
-                        let vcd = files.into_iter().map(|ref f| {
-                            use std::io::BufRead;
-                            if let Ok(file) = std::fs::File::open(f) {
-                                let buf = std::io::BufReader::new(file);
-                                let lines = buf.lines().fold(String::with_capacity(256), |mut x,y| {x.extend(y); x.push('\n'); x});
-                                let fname = f.file_name().map_or(String::new(), |x| x.to_string_lossy().to_string());
-                                Ok((lines, fname))
-                            } else {Err(f.to_string_lossy().to_string())}
-                        }).collect::<Result<Vec<(String, String)>, String>>();
-                        match vcd {
-                            Ok(v) => {
-                              *opening_data = v;
+            ui.vertical_centered( |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a dataset");}).clicked() {
+                        if let Ok(files) = native_dialog::FileDialog::new()
+                        .show_open_multiple_file() {
+                            let vcd = files.into_iter().map(|ref f| {
+                                use std::io::BufRead;
+                                if let Ok(file) = std::fs::File::open(f) {
+                                    let buf = std::io::BufReader::new(file);
+                                    let lines = buf.lines().fold(String::with_capacity(256), |mut x,y| {x.extend(y); x.push('\n'); x});
+                                    let fname = f.file_name().map_or(String::new(), |x| x.to_string_lossy().to_string());
+                                    Ok((lines, fname))
+                                } else {Err(f.to_string_lossy().to_string())}
+                            }).collect::<Result<Vec<(String, String)>, String>>();
+                            match vcd {
+                                Ok(v) => {
+                                  *opening_data = v;
+                                }
+                                Err(e) => println!("Error: {}", e),
                             }
-                            Err(e) => println!("Error: {}", e),
                         }
                     }
-                }
-
-                // ui.button("Save");
-
-                if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
-                    datasets.push((vec![], "new dataset".into()));
-                    for (p, m) in str_params.iter_mut().zip(models.iter_mut()) {
-                        p.push(m.circuit.generate_new_params().into())
+    
+                    // ui.button("Save");
+    
+                    if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
+                        datasets.push((vec![], "new dataset".into()));
+                        for (p, m) in str_params.iter_mut().zip(models.iter_mut()) {
+                            p.push(m.circuit.generate_new_params().into())
+                        }
                     }
-                }
-                if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate dataset");}).clicked() {
-                    datasets.push(datasets[*current_dataset].clone());
-                    for p in str_params.iter_mut() {
-                        let dc = p[*current_dataset].clone();
-                        p.push(dc)
-                    }
-                };
-                if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
-                    datasets.remove(*current_dataset);
-                    for p in str_params.iter_mut() {
-                        p.remove(*current_dataset);
-                    }
-                    if *current_dataset > 0 {*current_dataset -= 1;}
-                }
-            });
-
-            ui.separator();
-
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (i, d) in datasets.iter_mut().enumerate() {
-                    let tedit = egui::TextEdit::singleline(&mut d.1);
-                    let tedit = if *current_dataset==i {tedit.text_color(Color32::RED)} else {tedit};
-                    if ui.add(tedit).clicked() {
-                        *current_dataset=i;
-                        *editor = dataset_to_string(&d.0);
+                    if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate dataset");}).clicked() {
+                        datasets.push(datasets[*current_dataset].clone());
+                        for p in str_params.iter_mut() {
+                            let dc = p[*current_dataset].clone();
+                            p.push(dc)
+                        }
                     };
-                }
+                    if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
+                        datasets.remove(*current_dataset);
+                        for p in str_params.iter_mut() {
+                            p.remove(*current_dataset);
+                        }
+                        if *current_dataset > 0 {*current_dataset -= 1;}
+                    }
+                });
+    
+                ui.separator();
+    
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (i, d) in datasets.iter_mut().enumerate() {
+                        let tedit = egui::TextEdit::singleline(&mut d.1);
+                        let tedit = if *current_dataset==i {tedit.text_color(Color32::RED)} else {tedit};
+                        if ui.add(tedit).clicked() {
+                            *current_dataset=i;
+                            *editor = dataset_to_string(&d.0);
+                        };
+                    }
+                });
             });
         });
 
         egui::SidePanel::left("datalist").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Save project").clicked() {
-                    if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
-                        if let Ok(mut file) = std::fs::File::create(filename) {
-                            if let Some(nparams) = try_into_numbers(str_params) {
+                if ui.button("Save project as").clicked() {
+                    if let Some(nparams) = try_into_numbers(str_params) {
+                        if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
+                            if let Ok(mut file) = std::fs::File::create(filename) {
                                 if let Ok(string) = Self::save_to_string(models, datasets, &nparams) {
                                     use std::io::Write;
                                     writeln!(&mut file, "{}", string).unwrap();
@@ -707,6 +714,9 @@ impl epi::App for TemplateApp {
                                 }
                             }
                         }
+                    }
+                    else {
+                        *text_status = "Can't save due to errors in parameters".into();
                     }
                 }
 
@@ -783,15 +793,13 @@ impl epi::App for TemplateApp {
     
                         let optresult = opt.optimize(&mut paramlist.vals);
     
-                        *fitting_response = match optresult {
+                        *text_status = match optresult {
                             Ok((okstate, _)) => {
+                                use nlopt::SuccessState::*;
                                 let out = match okstate {
-                                    nlopt::SuccessState::Success => {"Fitting finished".into()}
-                                    nlopt::SuccessState::FtolReached => {"Fitting finished".into()}
-                                    nlopt::SuccessState::StopValReached => {"Fitting finished".into()}
-                                    nlopt::SuccessState::XtolReached => {"Fitting finished".into()}
-                                    nlopt::SuccessState::MaxEvalReached => {"Max evaluations reached".into()}
-                                    nlopt::SuccessState::MaxTimeReached => {"Max time reached".into()}
+                                    Success | FtolReached | StopValReached | XtolReached => {"Fitting finished".into()}
+                                    MaxEvalReached => {"Max evaluations reached".into()}
+                                    MaxTimeReached => {"Max time reached".into()}
                                 };
 
                                 str_params[*current_circ][*current_dataset] = paramlist.into();
@@ -799,12 +807,13 @@ impl epi::App for TemplateApp {
                                 out
                             }
                             Err((failstate, _)) => {
+                                use nlopt::FailState::*;
                                 match failstate {
-                                    nlopt::FailState::Failure => {"Fitting failure".into()}
-                                    nlopt::FailState::InvalidArgs => {"The parameter values exceed the bounds".into()}
-                                    nlopt::FailState::OutOfMemory => {"Memory error".into()}
-                                    nlopt::FailState::RoundoffLimited => {"Roundoff limited".into()}
-                                    nlopt::FailState::ForcedStop => {"Forced stop of fitting".into()}
+                                    Failure => {"Fitting failure".into()}
+                                    InvalidArgs => {"The parameter values exceed the bounds".into()}
+                                    OutOfMemory => {"Memory error".into()}
+                                    RoundoffLimited => {"Roundoff limited".into()}
+                                    ForcedStop => {"Forced stop of fitting".into()}
                                 }
                             }
                         };
@@ -862,6 +871,8 @@ impl epi::App for TemplateApp {
                     let paramlist = &mut str_params[*current_circ][*current_dataset];
                     let param_ed = models.get_mut(*current_circ).map_or(&mut empty_ed, |x| &mut x.parameters);
 
+                    let wi = ui.available_width() - 155.0;  // Magic numbers
+
                     for (((name, val), (min, max)), ed) in 
                             param_names.iter()
                             .zip(&mut paramlist.vals)
@@ -885,31 +896,32 @@ impl epi::App for TemplateApp {
 
                             ui.label(name);
 
-                            //let mut smin = min.to_string();
-                            //let mut smax = max.to_string();
-                            //let mut sval = val.to_string();
+                            let mut x_txt = |s: &mut String, div, hint| {
+                                let tclr = |s:&str| if let Ok(_) = s.parse::<f64>() {None} else {Some(Color32::RED)};
+                                let mclr = tclr(s);
+                                if egui::TextEdit::singleline(s)
+                                    .text_color_opt(mclr)
+                                    .desired_width(wi/div)
+                                    .ui(ui)
+                                    .on_hover_ui(|ui| {ui.label(hint);})
+                                    .changed()
+                                {
+                                    lock_now = true;
+                                }
+                            };
 
-                            if egui::TextEdit::singleline(min).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Min");}).changed() {
-                                fitting_response.clear();
-                                lock_now = true;
-                            }
-                            if egui::TextEdit::singleline(max).desired_width(50.).ui(ui).on_hover_ui(|ui| {ui.label("Max");}).changed() {
-                                fitting_response.clear();
-                                lock_now = true;
-                            }
-                            if egui::TextEdit::singleline(val).desired_width(80.).ui(ui).on_hover_ui(|ui| {ui.label("Value");}).changed() {
-                                fitting_response.clear();
-                                lock_now = true;
-                            }
+                            x_txt(min, 4., "Min");
+                            x_txt(max, 4., "Max");
+                            x_txt(val, 2., "Value");
 
                             if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
                                 if let Ok(mut nval) = val.parse::<f64>() {
                                     if ctx.input().modifiers.shift  { nval /= 1.01 }
                                     else if ctx.input().modifiers.command { nval /= 2.0 }
                                     else { nval /= 1.1 }
-                                    *val = nval.to_string();
+                                    *val = format!("{}", PrettyPrintFloat(nval));
                                 }
-                                fitting_response.clear();
+                                text_status.clear();
                                 lock_now = true;
                             }
                             if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
@@ -917,17 +929,17 @@ impl epi::App for TemplateApp {
                                     if ctx.input().modifiers.shift  { nval *= 1.01 }
                                     else if ctx.input().modifiers.command { nval *= 2.0 }
                                     else { nval *= 1.1 }
-                                    *val = nval.to_string();
+                                    *val = format!("{}", PrettyPrintFloat(nval));
                                 }
-                                fitting_response.clear();
+                                text_status.clear();
                                 lock_now = true;
                             }
                         });
                     }
 
-                    if !fitting_response.is_empty() {
+                    if !text_status.is_empty() {
                         ui.separator();
-                        ui.label(&*fitting_response);
+                        ui.label(&*text_status);
                     }
 
                     lock_now
@@ -958,10 +970,12 @@ impl epi::App for TemplateApp {
                     }
                 );
 
+                let eplot_type = *plot_type;
+
                 let points_dataset = egui::plot::Points::new(
                         egui::plot::Values::from_values(
                             dataset.iter().map(|d| 
-                                match plot_type {
+                                match eplot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
                                     PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg()*180.0/std::f64::consts::PI),
                                     PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
@@ -989,7 +1003,14 @@ impl epi::App for TemplateApp {
 
                 let plt = egui::plot::Plot::new("plot1")
                     .width(ui.available_width())
-                    .height(ui.available_height()/2.0);
+                    .height(ui.available_height()/2.0)
+                    .custom_label_func(move |_s, &Value{x, y}| -> String {
+                        match eplot_type {
+                            PlotType::Nyquist => format!("{}\n{} Ohm", x, y),
+                            PlotType::BodePhase => format!("{} Hz:\n{} Ohm", 10.0_f64.powf(x), y),
+                            PlotType::BodeAmp => format!("{} Hz:\n{}°", 10.0_f64.powf(x), y),
+                        }
+                    });
 
                 plt.show(ui, |plot_ui| {
                     plot_ui.points(points_dataset);

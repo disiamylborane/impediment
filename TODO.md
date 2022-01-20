@@ -9,19 +9,20 @@ Past:
 
 Fix:
 
-- [ ] Inspect save option for wrong parameter data
-- [ ] Custom plot labels
+- [x] Inspect save option for wrong parameter data
+- [x] Custom plot labels
+- [x] Semantic number rendering
 
 Minor features:
 
-- [.] Show the result of optimization routines, highlight InvalidArgs
-- [ ] Textbox scalability (min/max/val)
-- [ ] Different types of data representation in data textbox
+- [x] Show the result of optimization routines, highlight InvalidArgs
+- [x] Textbox scalability (min/max/val)
 
 Major features for 1.0:
 
 - [ ] Undo buffer
 - [ ] Implement the mutiple-data fitting feature
+- [ ] Different types of data representation in data textbox
 
 Further:
 
