@@ -1,12 +1,12 @@
 extern crate csv;
 
 fn rec_to_datapiece(
-    rec: csv::StringRecord,
+    rec: &csv::StringRecord,
     params: (crate::FreqOpenParam, crate::ImpOpenParam, usize, usize, usize, usize)
 ) -> Option<crate::DataPiece> {
-    let freq_d = rec.get(params.2)?.to_string().replace(",",".").parse::<f64>().ok()?;
-    let rp1 = rec.get(params.3)?.to_string().replace(",",".").parse::<f64>().ok()?;
-    let rp2 = rec.get(params.4)?.to_string().replace(",",".").parse::<f64>().ok()?;
+    let freq_d = rec.get(params.2)?.to_string().replace(',', ".").parse::<f64>().ok()?;
+    let rp1 = rec.get(params.3)?.to_string().replace(',', ".").parse::<f64>().ok()?;
+    let rp2 = rec.get(params.4)?.to_string().replace(',', ".").parse::<f64>().ok()?;
 
     let freq = match params.0 {
         crate::FreqOpenParam::Hz => {freq_d}
@@ -45,16 +45,15 @@ pub fn csv_to_impediment_delim(
     let mut rec_iter = rdr.records();
     let first_rec = rec_iter.next()?.ok()?;
 
-    if let Some(fdrec) = rec_to_datapiece(first_rec.clone(), params) {
+    rec_to_datapiece(&first_rec, params).map_or_else(|| {
+        // let _s = first_rec;
+    }, |fdrec| {
         out.push(fdrec);
-    }
-    else {
-        let _s = first_rec;
-    }
+    });
 
     for rec in rec_iter {
         let rec = rec.ok()?;
-        out.push(rec_to_datapiece(rec, params)?);
+        out.push(rec_to_datapiece(&rec, params)?);
     }
 
     Some(out)

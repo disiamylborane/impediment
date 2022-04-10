@@ -1,13 +1,20 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::pedantic)]
+#![allow(clippy::blocks_in_if_conditions)]
 
 use float_pretty_print::PrettyPrintFloat;
 
 use std::{fmt::Display, str::FromStr};
 
 use circuit::Circuit;
-use data::DataPiece;
 use eframe::{egui::{self, Color32, Vec2, vec2, plot::Value}, epi};
+
+
+#[derive(Debug, Copy, Clone)]
+pub struct DataPiece {
+    pub freq: f64,
+    pub imp: crate::Cplx,
+}
 
 use crate::circuit::Element;
 
@@ -39,8 +46,8 @@ pub struct StringParameterDesc {
 }
 
 impl From<ParameterDesc> for StringParameterDesc {
-    fn from(v: ParameterDesc) -> StringParameterDesc {
-        StringParameterDesc{
+    fn from(v: ParameterDesc) -> Self {
+        Self {
             vals: v.vals.into_iter().map(|x| format!("{}", PrettyPrintFloat(x))).collect(),
             bounds: v.bounds.into_iter().map(|(a,b)| (format!("{}", PrettyPrintFloat(a)), format!("{}", PrettyPrintFloat(b)))).collect(), 
         }
@@ -49,9 +56,9 @@ impl From<ParameterDesc> for StringParameterDesc {
 
 impl TryFrom<&StringParameterDesc> for ParameterDesc {
     type Error = ();
-    fn try_from(v: &StringParameterDesc) -> Result<ParameterDesc, ()> {
+    fn try_from(v: &StringParameterDesc) -> Result<Self, ()> {
         Ok(
-            ParameterDesc {
+            Self {
                 vals: v.vals.iter().map(|x| x.parse::<f64>().ok()).collect::<Option<Vec<f64>>>().ok_or(())?,
                 bounds: v.bounds.iter().map(|(a,b)| {
                     let (a,b) = (a.parse::<f64>().ok(), b.parse::<f64>().ok());
@@ -66,9 +73,9 @@ impl TryFrom<&StringParameterDesc> for ParameterDesc {
 }
 
 
-fn try_into_numbers(x: &Vec<Vec<StringParameterDesc>>) -> Option<Vec<Vec<ParameterDesc>>> {
-    x.into_iter().map(|ds| {
-        ds.into_iter().map(|r|->Option<ParameterDesc> {
+fn try_into_numbers(x: &[Vec<StringParameterDesc>]) -> Option<Vec<Vec<ParameterDesc>>> {
+    x.iter().map(|ds| {
+        ds.iter().map(|r|->Option<ParameterDesc> {
             r.try_into().ok()
         }).collect::< Option<Vec<_>> >()
     }).collect::< Option<Vec<_>> >()
@@ -110,7 +117,7 @@ pub struct Model {
 pub enum FreqOpenParam {Hz, Khz, Rads, Krads}
 impl Display for FreqOpenParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use FreqOpenParam::*;
+        use FreqOpenParam::{Hz, Khz, Krads, Rads};
         write!(f, "{}", match self {Hz => "Hz", Khz => "kHz", Rads => "rad/s", Krads => "krad/s",})
     }
 }
@@ -118,7 +125,7 @@ impl Display for FreqOpenParam {
 pub enum ImpOpenParam {PlusOhm, MinusOhm, PlusKohm, MinusKohm}
 impl Display for ImpOpenParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ImpOpenParam::*;
+        use ImpOpenParam::{MinusKohm, MinusOhm, PlusKohm, PlusOhm};
         write!(f, "{}", match self {PlusOhm => "re + im, Ω", MinusOhm => "re - im, Ω", PlusKohm => "re + im, kΩ", MinusKohm => "re - im, kΩ",})
     }
 }
@@ -154,8 +161,9 @@ type AppData = (Vec<Model>, Vec<(Vec<DataPiece>, String)>, Vec< Vec< ParameterDe
 
 impl TemplateApp {
     fn save_to_string(models: &[Model], datasets: &[(Vec<DataPiece>, String)], params: &[Vec< ParameterDesc >]) -> Result<String, std::fmt::Error> {
-        let mut f = String::new();
         use std::fmt::Write;
+
+        let mut f = String::new();
         for m in models.iter() {
             writeln!(f, "Model {}", m.name)?;
             writeln!(f, "{}", m.circuit)?;
@@ -241,9 +249,9 @@ impl TemplateApp {
                                            .split(',')
                                            .filter(|&x| !x.trim().is_empty())
                                            .map(|x| {
-                                               let (smin, smax) = x.trim().strip_prefix('(')?.strip_suffix(')')?.split_once("..")?;
-                                               let min = smin.parse::<f64>().ok()?;
-                                               let max = smax.parse::<f64>().ok()?;
+                                               let (str_min, str_max) = x.trim().strip_prefix('(')?.strip_suffix(')')?.split_once("..")?;
+                                               let min = str_min.parse::<f64>().ok()?;
+                                               let max = str_max.parse::<f64>().ok()?;
                                                Some((min,max))
                                            })
                                            .collect::<Option<Vec<(f64,f64)>>>()?;
@@ -318,15 +326,16 @@ fn block_by_coords(circuit: &Circuit, widsize: Vec2, clickpos: Vec2, blocksize: 
     // The circuit is located at the center of the canvas
 
     // Get the circuit size
-    let (i_sx, i_sy) = circuit.painted_size();
-    let (sx,sy) = (i_sx as f32 * blocksize, i_sy as f32 * blocksize);
+    let (idx_s_x, idx_s_y) = circuit.painted_size();
+    let (sx,sy) = (f32::from(idx_s_x) * blocksize, f32::from(idx_s_y) * blocksize);
 
     // Recalc (cursor vs canvas) => (cursor vs circuit)
-    let (xcirc, ycirc) = (clickpos.x - (widsize.x-sx)/2., clickpos.y-(widsize.y-sy)/2.);
-    if xcirc < 0. || ycirc < 0. {return None;}
+    let (x_circ, y_circ) = (clickpos.x - (widsize.x-sx)/2., clickpos.y-(widsize.y-sy)/2.);
+    if x_circ < 0. || y_circ < 0. {return None;}
 
-    let (x,y) = (xcirc / blocksize, ycirc / blocksize);
+    let (x,y) = (x_circ / blocksize, y_circ / blocksize);
 
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     Some((x as u16, y as u16))
 }
 
@@ -339,10 +348,10 @@ impl Default for TemplateApp {
             ]),
             Circuit::Element(Element::Resistor),
         ]);
-        let params = ParameterDesc { vals : vec![100.,0.000005,100.], bounds : vec![(1., 10000.),(1e-6, 1e-1),(1., 10000.0)] };
+        let params = ParameterDesc { vals : vec![100.,5e-6,100.], bounds : vec![(1., 10000.),(1e-6, 1e-1),(1., 10000.0)] };
 
         let data = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5].iter().map(|&freq|
-            data::DataPiece {freq, imp: circ.impedance(std::f64::consts::TAU*freq, &params.vals)}
+            DataPiece {freq, imp: circ.impedance(std::f64::consts::TAU*freq, &params.vals)}
         ).collect();
 
         let mut out = Self {
@@ -381,21 +390,119 @@ impl Default for TemplateApp {
     }
 }
 
-pub fn geomspace(first: f64, last: f64, count: usize) -> impl Iterator<Item=f64>
+pub fn geomspace(first: f64, last: f64, count: u32) -> impl Iterator<Item=f64>
 {
     let (lf, ll) = (first.ln(), last.ln());
-    let delta = (ll - lf) / ((count-1) as f64);
-    return (0..count).map(move |i| (lf + (i as f64) * delta).exp());
+    let delta = (ll - lf) / f64::from(count-1);
+    (0..count).map(move |i| (f64::from(i).mul_add(delta, lf)).exp())
 }
+
+
+fn display_import_window(
+        ctx: &egui::Context, 
+        opening_mode: &mut (FreqOpenParam, ImpOpenParam, usize, usize, usize, usize),
+        opening_data: &mut Vec<(String, String)>,
+        datasets: &mut Vec<(Vec<DataPiece>, String)>,
+        str_params: &mut [Vec< StringParameterDesc >],
+) {
+    egui::Window::new("Data").show(ctx, |ui|
+        ui.vertical(|ui| {
+            ui.vertical(|ui| {
+                ui.label("Columns");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Freq");
+                    if ui.small_button("<").clicked() && opening_mode.2 > 0 {opening_mode.2 -= 1}
+                    ui.label(&opening_mode.2.to_string());
+                    if ui.small_button(">").clicked() {opening_mode.2 += 1}
+                });
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Hz, &format!("{}", FreqOpenParam::Hz));
+                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Khz, &format!("{}", FreqOpenParam::Khz));
+                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Rads, &format!("{}", FreqOpenParam::Rads));
+                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Krads, &format!("{}", FreqOpenParam::Krads));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Re Z");
+                    if ui.small_button("<").clicked() && opening_mode.3 > 0 {opening_mode.3 -= 1}
+                    ui.label(&opening_mode.3.to_string());
+                    if ui.small_button(">").clicked() {opening_mode.3 += 1}
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Im Z");
+                    if ui.small_button("<").clicked() && opening_mode.4 > 0 {opening_mode.4 -= 1}
+                    ui.label(&opening_mode.4.to_string());
+                    if ui.small_button(">").clicked() {opening_mode.4 += 1}
+                });
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::PlusOhm, &format!("{}", ImpOpenParam::PlusOhm));
+                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::MinusOhm, &format!("{}", ImpOpenParam::MinusOhm));
+                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::PlusKohm, &format!("{}", ImpOpenParam::PlusKohm));
+                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::MinusKohm, &format!("{}", ImpOpenParam::MinusKohm));
+                });
+            });
+            ui.vertical(|ui| {
+                let new_dset: Option<Vec<(Vec<DataPiece>, String)>>= opening_data.iter().map(|od| {
+                    Some((file::csv_to_impediment(&od.0, *opening_mode)?, od.1.clone()))
+                }).collect();
+
+                if let Some(new_dset) = new_dset {
+                    let new_dset = ui.horizontal(|ui| {
+                        if ui.button("Load").clicked() {
+                            let mut newds: Vec<(Vec<DataPiece>, String)> = new_dset.into_iter().collect();
+                            for paramset in str_params.iter_mut() {
+                                for _ in 0..newds.len() {
+                                  paramset.push(paramset[0].clone());
+                                }
+                            }
+                            datasets.append(&mut newds);
+                            *opening_data = vec![];
+                            opening_mode.5 = 0;  // FIXME: revamp the logics
+                            return None;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            *opening_data = vec![];
+                            opening_mode.5 = 0;  // FIXME: revamp the logics
+                            return None;
+                        };
+                        Some(new_dset)
+                    }).inner;
+                    if let Some(new_dset) = new_dset {
+                        ui.horizontal(|ui| {
+                            if ui.small_button("<").clicked() && opening_mode.5 > 0 {
+                                opening_mode.5 -= 1;
+                            }
+                            ui.label(&new_dset[opening_mode.5].1);
+                            if ui.small_button(">").clicked() && opening_mode.5+1 < opening_data.len() {
+                                opening_mode.5 += 1;
+                            }
+                        });
+                        
+                        let dstring = dataset_to_string(&new_dset[opening_mode.5].0);
+
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.label(&dstring);
+                        });
+                    }
+                }
+                else if ui.button("Cancel").clicked(){
+                    *opening_data = vec![];
+                }
+            });
+        })
+    );
+}
+
 
 impl epi::App for TemplateApp {
     fn name(&self) -> &str {
         "Impediment"
     }
 
-    /// Called each time the UI needs repainting, which may be many times per second.
-    /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
-    fn update(&mut self, ctx: &egui::CtxRef, _frame: &epi::Frame) {
+    #[allow(clippy::too_many_lines)]
+    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+        ctx.set_visuals(egui::Visuals::dark());
+
         let Self {
             fit_method, 
             component, 
@@ -414,123 +521,12 @@ impl epi::App for TemplateApp {
         ..} = self;
 
         if !opening_data.is_empty() {
-            egui::Window::new("Data").show(ctx, |ui|
-                ui.vertical(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label("Columns");
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label("Freq");
-                            if ui.small_button("<").clicked() && opening_mode.2 > 0 {opening_mode.2 -= 1}
-                            ui.label(&opening_mode.2.to_string());
-                            if ui.small_button(">").clicked() {opening_mode.2 += 1}
-                        });
-                        ui.horizontal(|ui| {
-                            ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Hz, &format!("{}", FreqOpenParam::Hz));
-                            ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Khz, &format!("{}", FreqOpenParam::Khz));
-                            ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Rads, &format!("{}", FreqOpenParam::Rads));
-                            ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Krads, &format!("{}", FreqOpenParam::Krads));
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Re Z");
-                            if ui.small_button("<").clicked() && opening_mode.3 > 0 {opening_mode.3 -= 1}
-                            ui.label(&opening_mode.3.to_string());
-                            if ui.small_button(">").clicked() {opening_mode.3 += 1}
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Im Z");
-                            if ui.small_button("<").clicked() && opening_mode.4 > 0 {opening_mode.4 -= 1}
-                            ui.label(&opening_mode.4.to_string());
-                            if ui.small_button(">").clicked() {opening_mode.4 += 1}
-                        });
-                        ui.vertical(|ui| {
-                            ui.selectable_value(&mut opening_mode.1, ImpOpenParam::PlusOhm, &format!("{}", ImpOpenParam::PlusOhm));
-                            ui.selectable_value(&mut opening_mode.1, ImpOpenParam::MinusOhm, &format!("{}", ImpOpenParam::MinusOhm));
-                            ui.selectable_value(&mut opening_mode.1, ImpOpenParam::PlusKohm, &format!("{}", ImpOpenParam::PlusKohm));
-                            ui.selectable_value(&mut opening_mode.1, ImpOpenParam::MinusKohm, &format!("{}", ImpOpenParam::MinusKohm));
-                        });
-                    });
-                    ui.vertical(|ui| {
-                        let new_dset: Option<Vec<(Vec<DataPiece>, String)>>= opening_data.iter().map(|od| {
-                            Some((file::csv_to_impediment(&od.0, *opening_mode)?, od.1.clone()))
-                        }).collect();
-
-                        if let Some(new_dset) = new_dset {
-                          if ui.button("Load").clicked() {
-                              let mut newds: Vec<(Vec<DataPiece>, String)> = new_dset.into_iter().collect();
-                              for paramset in str_params.iter_mut() {
-                                  for _ in 0..newds.len() {
-                                    paramset.push(paramset[0].clone());
-                                  }
-                              }
-                              datasets.append(&mut newds);
-                              *opening_data = vec![];
-                              return;
-                          }
-                          if ui.button("Cancel").clicked() {
-                              *opening_data = vec![];
-                              return;
-                          };
-                          ui.horizontal(|ui| {
-                              if ui.small_button("<").clicked() && opening_mode.5 > 0 {
-                                  opening_mode.5 -= 1;
-                              }
-                              ui.label(&new_dset[opening_mode.5].1);
-                              if ui.small_button(">").clicked() && opening_mode.5+1 < opening_data.len() {
-                                  opening_mode.5 += 1;
-                              }
-                          });
-                          
-                          let dstring = dataset_to_string(&new_dset[opening_mode.5].0);
-
-                          egui::ScrollArea::vertical().show(ui, |ui| {
-                              ui.label(&dstring);
-                          });
-                        }
-                        else if ui.button("Cancel").clicked(){
-                            *opening_data = vec![];
-                        }
-                    });
-                })
-            );
+            display_import_window(ctx, opening_mode, opening_data, datasets, str_params);
         }
 
         egui::SidePanel::left("models").show(ctx, |ui| {
             ui.vertical_centered_justified( |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a circuit");}).clicked() {
-                        if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_open_single_file() {
-                            if let Ok(file) = std::fs::File::open(filename.clone()) {
-                                use std::io::BufRead;
-                                let buf = std::io::BufReader::new(&file);
-                                if let Some(Ok(line)) = buf.lines().next() {
-                                    if let Ok(circ) = Circuit::from_str(&line) {
-                                        str_params.push(
-                                            vec![circ.generate_new_params().into(); datasets.len()]
-                                        );
-                                        models.push(Model {
-                                            name: filename.to_string_lossy().as_ref().to_owned(),
-                                            parameters: vec![ParameterEditability::Plural; circ.paramlen()],
-                                            circuit: circ,
-                                            lock: true
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-    
-                    if ui.button("Save").on_hover_ui(|ui| {ui.label("Save current circuit");}).clicked() {
-                        if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
-                            if let Ok(mut file) = std::fs::File::create(filename) {
-                                if let Some(mdl) = models.get(*current_circ) {
-                                    use std::io::Write;
-                                    writeln!(&mut file, "{}", mdl.circuit).unwrap();
-                                }
-                            }
-                        }
-                    }
-    
                     if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");}).clicked() {
                         let newmodel = Model {
                             circuit: Circuit::Element(Element::Resistor),
@@ -555,6 +551,16 @@ impl epi::App for TemplateApp {
                         str_params.remove(*current_circ);
                         if *current_circ != 0 {*current_circ -= 1;}
                     };
+                    if ui.button("Up").clicked() && *current_circ > 0 {
+                        (models as &mut[_]).swap(*current_circ, *current_circ - 1);
+                        (str_params as &mut[_]).swap(*current_circ, *current_circ - 1);
+                        *current_circ -= 1;
+                    }
+                    if ui.button("Down").clicked() && *current_circ < models.len() - 1 {
+                        (models as &mut[_]).swap(*current_circ, *current_circ + 1);
+                        (str_params as &mut[_]).swap(*current_circ, *current_circ + 1);
+                        *current_circ += 1;
+                    }
                 });
     
                 ui.separator();
@@ -581,7 +587,7 @@ impl epi::App for TemplateApp {
                 if let Some(c) = models.get_mut(*current_circ) {
                     let widsize = size;
                     let size = c.circuit.painted_size();
-                    let size = egui::vec2(size.0 as _, size.1 as _)*blocksize;
+                    let size = egui::vec2(size.0.into(), size.1.into())*blocksize;
                     c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0, if c.lock {Color32::WHITE} else {Color32::LIGHT_RED});
     
                     if response.clicked() && !c.lock {
@@ -599,16 +605,16 @@ impl epi::App for TemplateApp {
                             if let Some(block) = block {
                                 match interaction {
                                     ComponentInteraction::Change => {
-                                        c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters)
+                                        c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters);
                                     },
                                     ComponentInteraction::Series => {
-                                        c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                        c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
                                     },
                                     ComponentInteraction::Parallel => {
-                                        c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                        c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
                                     }
                                     ComponentInteraction::Delete => {
-                                        c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters)
+                                        c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
                                     }
                                 }
                             }
@@ -640,7 +646,7 @@ impl epi::App for TemplateApp {
         egui::SidePanel::right("rdata").show(ctx, |ui| {
             ui.vertical_centered( |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Load").on_hover_ui(|ui| {ui.label("Load a dataset");}).clicked() {
+                    if ui.button("Import").on_hover_ui(|ui| {ui.label("Load a dataset");}).clicked() {
                         if let Ok(files) = native_dialog::FileDialog::new()
                         .show_open_multiple_file() {
                             let vcd = files.into_iter().map(|ref f| {
@@ -666,14 +672,14 @@ impl epi::App for TemplateApp {
                     if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
                         datasets.push((vec![], "new dataset".into()));
                         for (p, m) in str_params.iter_mut().zip(models.iter_mut()) {
-                            p.push(m.circuit.generate_new_params().into())
+                            p.push(m.circuit.generate_new_params().into());
                         }
                     }
                     if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate dataset");}).clicked() {
                         datasets.push(datasets[*current_dataset].clone());
                         for p in str_params.iter_mut() {
                             let dc = p[*current_dataset].clone();
-                            p.push(dc)
+                            p.push(dc);
                         }
                     };
                     if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
@@ -682,6 +688,20 @@ impl epi::App for TemplateApp {
                             p.remove(*current_dataset);
                         }
                         if *current_dataset > 0 {*current_dataset -= 1;}
+                    }
+                    if ui.button("Up").clicked() && *current_dataset > 0 {
+                        (datasets as &mut[_]).swap(*current_dataset, *current_dataset - 1);
+                        for sp in str_params.iter_mut() {
+                            sp.swap(*current_dataset, *current_dataset - 1);
+                        }
+                        *current_dataset -= 1;
+                    }
+                    if ui.button("Down").clicked() && *current_dataset < datasets.len() - 1 {
+                        (datasets as &mut[_]).swap(*current_dataset, *current_dataset + 1);
+                        for sp in str_params.iter_mut() {
+                            sp.swap(*current_dataset, *current_dataset + 1);
+                        }
+                        *current_dataset += 1;
                     }
                 });
     
@@ -703,8 +723,9 @@ impl epi::App for TemplateApp {
         egui::SidePanel::left("datalist").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Save project as").clicked() {
-                    if let Some(nparams) = try_into_numbers(str_params) {
-                        if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
+                    try_into_numbers(str_params).map_or_else(|| {
+                        *text_status = "Can't save due to errors in parameters".into();
+                    }, |nparams| if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
                             if let Ok(mut file) = std::fs::File::create(filename) {
                                 if let Ok(string) = Self::save_to_string(models, datasets, &nparams) {
                                     use std::io::Write;
@@ -713,11 +734,7 @@ impl epi::App for TemplateApp {
                                     println!("Error writing to the file");
                                 }
                             }
-                        }
-                    }
-                    else {
-                        *text_status = "Can't save due to errors in parameters".into();
-                    }
+                        });
                 }
 
                 if ui.button("Load project").clicked() {
@@ -726,7 +743,7 @@ impl epi::App for TemplateApp {
                             if let Some((m, d, p)) = Self::load_from_string(&sfile) {
                                 *models = m;
                                 *datasets = d;
-                                *str_params = p.into_iter().map(|ds| ds.into_iter().map(|x|x.into()).collect()).collect();
+                                *str_params = p.into_iter().map(|ds| ds.into_iter().map(Into::into).collect()).collect();
                                 *current_circ = 0;
                                 *current_dataset = 0;
                                 *opening_data = vec![];
@@ -786,7 +803,7 @@ impl epi::App for TemplateApp {
     
                         opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
                         opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
-                        opt.set_maxeval((-1_i32) as u32).unwrap();
+                        opt.set_maxeval(u32::MAX).unwrap();
                         opt.set_maxtime(10.0).unwrap();
     
                         opt.set_xtol_rel(1e-10).unwrap();
@@ -795,8 +812,8 @@ impl epi::App for TemplateApp {
     
                         *text_status = match optresult {
                             Ok((okstate, _)) => {
-                                use nlopt::SuccessState::*;
-                                let out = match okstate {
+                                use nlopt::SuccessState::{FtolReached, MaxEvalReached, MaxTimeReached, StopValReached, Success, XtolReached};
+                                let res_str = match okstate {
                                     Success | FtolReached | StopValReached | XtolReached => {"Fitting finished".into()}
                                     MaxEvalReached => {"Max evaluations reached".into()}
                                     MaxTimeReached => {"Max time reached".into()}
@@ -804,10 +821,10 @@ impl epi::App for TemplateApp {
 
                                 str_params[*current_circ][*current_dataset] = paramlist.into();
 
-                                out
+                                res_str
                             }
                             Err((failstate, _)) => {
-                                use nlopt::FailState::*;
+                                use nlopt::FailState::{Failure, ForcedStop, InvalidArgs, OutOfMemory, RoundoffLimited};
                                 match failstate {
                                     Failure => {"Fitting failure".into()}
                                     InvalidArgs => {"The parameter values exceed the bounds".into()}
@@ -848,7 +865,7 @@ impl epi::App for TemplateApp {
                     if let Some(cp) = copied_paramlist {
                         if cp.0 == *current_circ {
                             if let Some(dpl) = str_params.get(cp.0).and_then(|x| x.get(cp.1)) {
-                                str_params[*current_circ][*current_dataset] = dpl.to_owned();
+                                str_params[*current_circ][*current_dataset] = dpl.clone();
                             }
                         }
                     }
@@ -897,8 +914,8 @@ impl epi::App for TemplateApp {
                             ui.label(name);
 
                             let mut x_txt = |s: &mut String, div, hint| {
-                                let tclr = |s:&str| if let Ok(_) = s.parse::<f64>() {None} else {Some(Color32::RED)};
-                                let mclr = tclr(s);
+                                let t_clr = |s:&str| if s.parse::<f64>().is_ok() {None} else {Some(Color32::RED)};
+                                let mclr = t_clr(s);
                                 if egui::TextEdit::singleline(s)
                                     .text_color_opt(mclr)
                                     .desired_width(wi/div)
@@ -943,7 +960,7 @@ impl epi::App for TemplateApp {
                     }
 
                     lock_now
-                })
+                }).inner
             }).inner {
                 models[*current_circ].lock = true;
             }
@@ -960,13 +977,13 @@ impl epi::App for TemplateApp {
 
                 ui.horizontal(|ui|
                     if ui.small_button("Nyquist").clicked() {
-                        *plot_type = PlotType::Nyquist
+                        *plot_type = PlotType::Nyquist;
                     }
                     else if ui.small_button("Bode Amplitude").clicked() {
-                        *plot_type = PlotType::BodeAmp
+                        *plot_type = PlotType::BodeAmp;
                     }
                     else if ui.small_button("Bode Phase").clicked() {
-                        *plot_type = PlotType::BodePhase
+                        *plot_type = PlotType::BodePhase;
                     }
                 );
 
@@ -977,7 +994,7 @@ impl epi::App for TemplateApp {
                             dataset.iter().map(|d| 
                                 match eplot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
-                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg()*180.0/std::f64::consts::PI),
+                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg().to_degrees()),
                                     PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
                                 }
                             ).collect::<Vec<_>>() 
@@ -990,25 +1007,36 @@ impl epi::App for TemplateApp {
 
                 let rmin;
                 let rmax;
-                if dlen > 1 {
-                    rmin = dataset[0].freq;
-                    rmax = dataset[dlen-1].freq;
-                } else if dlen == 1 {
-                    rmin = dataset[0].freq/2.0;
-                    rmax = dataset[0].freq*2.0;
-                } else {
-                    rmin = 1.0;
-                    rmax = 1000.0;
+
+                match dlen {
+                    0 => {
+                        rmin = 1.0;
+                        rmax = 1000.0;
+                    }
+                    1 => {
+                        rmin = dataset[0].freq/2.0;
+                        rmax = dataset[0].freq*2.0;
+                    }
+                    _ => {
+                        rmin = dataset[0].freq;
+                        rmax = dataset[dlen-1].freq;
+                    }
                 }
 
                 let plt = egui::plot::Plot::new("plot1")
                     .width(ui.available_width())
                     .height(ui.available_height()/2.0)
-                    .custom_label_func(move |_s, &Value{x, y}| -> String {
+                    .label_formatter(move |_s, &Value{x, y}| -> String {
                         match eplot_type {
-                            PlotType::Nyquist => format!("{}\n{} Ohm", x, y),
-                            PlotType::BodePhase => format!("{} Hz:\n{} Ohm", 10.0_f64.powf(x), y),
-                            PlotType::BodeAmp => format!("{} Hz:\n{}°", 10.0_f64.powf(x), y),
+                            PlotType::Nyquist => format!("{} Ohm\n{} Ohm", x, y),
+                            PlotType::BodeAmp => format!("{} Hz:\n{} Ohm", 10.0_f64.powf(x), y),
+                            PlotType::BodePhase => format!("{} Hz:\n{}°", 10.0_f64.powf(x), y),
+                        }
+                    })
+                    .x_axis_formatter(move |v,_e| {
+                        match eplot_type {
+                            PlotType::Nyquist => v.to_string(),
+                            PlotType::BodePhase|PlotType::BodeAmp => (10.0_f64).powf(v).to_string(),
                         }
                     });
 
@@ -1022,18 +1050,18 @@ impl epi::App for TemplateApp {
                                 let imp = m.circuit.impedance(std::f64::consts::TAU*f, &cparams.vals);
                                 match plot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                                    PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg()*180.0/std::f64::consts::PI),
+                                    PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg().to_degrees()),
                                     PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
                                 }
                             }).collect();
-                            plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values.clone())).stroke((0.5, Color32::WHITE)));
+                            plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values)).stroke((0.5, Color32::WHITE)));
     
                             let data_values = 
                             dataset.iter().map(|d| {
                                 let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &cparams.vals);
                                 match plot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg()*180.0/std::f64::consts::PI),
+                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg().to_degrees()),
                                     PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
                                 }
                             }).collect();
@@ -1045,8 +1073,8 @@ impl epi::App for TemplateApp {
 
                 ui.label(match plot_type{
                     PlotType::Nyquist => "-Im Z vs Re Z",
-                    PlotType::BodeAmp => "|Z| vs lg freq",
-                    PlotType::BodePhase => "arg Z vs lg freq",
+                    PlotType::BodeAmp => "|Z| vs freq",
+                    PlotType::BodePhase => "arg Z vs freq",
                 });
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1054,9 +1082,9 @@ impl epi::App for TemplateApp {
                             .desired_rows(20)
                             .ui(ui);
                     if edit.lost_focus() {
-                        if let Some(v) = dataset_from_string(editor) {
+                        dataset_from_string(editor).map_or_else(|| println!("Wrong data"), |v| {
                             *dataset = v;
-                        } else {println!("Wrong data")}
+                        });
                     }
                 });
             });
@@ -1084,7 +1112,7 @@ impl epi::App for TemplateApp {
 
 fn main() {
     let app = TemplateApp::default();
-    let native_options = eframe::NativeOptions{initial_window_size: Some(vec2(1100., 600.)), ..Default::default()};
+    let native_options = eframe::NativeOptions{initial_window_size: Some(vec2(1100., 600.)), ..eframe::NativeOptions::default()};
     eframe::run_native(Box::new(app), native_options);
 }
 

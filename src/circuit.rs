@@ -15,44 +15,36 @@ pub enum Element {
     Warburg,
     Cpe,
 }
+use Element::{Capacitor, Inductor, Resistor, Warburg, Cpe};
+
 
 impl Element {
     fn exchange_param<'a>(self, element: Self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
             match self {
-                Element::Resistor => {pdesc.remove(idx);},
-                Element::Capacitor => {pdesc.remove(idx);},
-                Element::Inductor => {pdesc.remove(idx);},
-                Element::Warburg => {pdesc.remove(idx);},
-                Element::Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
+                Resistor|Capacitor|Inductor|Warburg => {pdesc.remove(idx);},
+                Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
             }
             match element {
-                Element::Resistor => {pdesc.insert(idx, (100., (1., 100000.)))},
-                Element::Capacitor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
-                Element::Inductor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
-                Element::Warburg => {pdesc.insert(idx, (10., (1., 100000.)))},
-                Element::Cpe => {
+                Resistor => {pdesc.insert(idx, (100., (1., 1e5)))},
+                Capacitor|Inductor => {pdesc.insert(idx, (1e-6, (1e-9, 0.1)))},
+                Warburg => {pdesc.insert(idx, (10., (1., 1e5)))},
+                Cpe => {
                     pdesc.insert(idx, (0.8, (0.01, 0.99)));
-                    pdesc.insert(idx, (0.000001, (0.000000001, 0.1)));
+                    pdesc.insert(idx, (1e-6, (1e-9, 0.1)));
                 },
             }
         }
         match self {
-            Element::Resistor => editability.remove(idx),
-            Element::Capacitor => editability.remove(idx),
-            Element::Inductor => editability.remove(idx),
-            Element::Warburg => editability.remove(idx),
-            Element::Cpe => {
+            Resistor|Capacitor|Inductor|Warburg => editability.remove(idx),
+            Cpe => {
                 editability.remove(idx);
                 editability.remove(idx)
             }
         };
         match element {
-            Element::Resistor => editability.insert(idx, ParameterEditability::Plural),
-            Element::Capacitor => editability.insert(idx, ParameterEditability::Plural),
-            Element::Inductor => editability.insert(idx, ParameterEditability::Plural),
-            Element::Warburg => editability.insert(idx, ParameterEditability::Plural),
-            Element::Cpe => {
+            Resistor|Capacitor|Inductor|Warburg => editability.insert(idx, ParameterEditability::Plural),
+            Cpe => {
                 editability.insert(idx, ParameterEditability::Plural);
                 editability.insert(idx, ParameterEditability::Plural);
             }
@@ -61,19 +53,13 @@ impl Element {
     fn remove_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
                 match self {
-                Element::Resistor => {pdesc.remove(idx);},
-                Element::Capacitor => {pdesc.remove(idx);},
-                Element::Inductor => {pdesc.remove(idx);},
-                Element::Warburg => {pdesc.remove(idx);},
-                Element::Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
+                Resistor|Capacitor|Inductor|Warburg => {pdesc.remove(idx);},
+                Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
             }
         }
         match self {
-            Element::Resistor => editability.remove(idx),
-            Element::Capacitor => editability.remove(idx),
-            Element::Inductor => editability.remove(idx),
-            Element::Warburg => editability.remove(idx),
-            Element::Cpe => {
+            Resistor|Capacitor|Inductor|Warburg => editability.remove(idx),
+            Cpe => {
                 editability.remove(idx);
                 editability.remove(idx)
             }
@@ -81,24 +67,21 @@ impl Element {
     }
     fn insert_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
+            // @Refactor: Duplicate
             match self {
-                Element::Resistor => {pdesc.insert(idx, (100., (1., 100000.)))},
-                Element::Capacitor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
-                Element::Inductor => {pdesc.insert(idx, (0.000001, (0.000000001, 0.1)))},
-                Element::Warburg => {pdesc.insert(idx, (10., (1., 100000.)))},
-                Element::Cpe => {
+                Resistor => {pdesc.insert(idx, (100., (1., 1e5)))},
+                Capacitor|Inductor => {pdesc.insert(idx, (1e-6, (1e-9, 0.1)))},
+                Warburg => {pdesc.insert(idx, (10., (1., 1e5)))},
+                Cpe => {
                     pdesc.insert(idx, (0.8, (0.01, 0.99)));
-                    pdesc.insert(idx, (0.000001, (0.000000001, 0.1)));
+                    pdesc.insert(idx, (1e-6, (1e-9, 0.1)));
                 },
             }
         }
 
         match self {
-            Element::Resistor => editability.insert(idx, ParameterEditability::Plural),
-            Element::Capacitor => editability.insert(idx, ParameterEditability::Plural),
-            Element::Inductor => editability.insert(idx, ParameterEditability::Plural),
-            Element::Warburg => editability.insert(idx, ParameterEditability::Plural),
-            Element::Cpe => {
+            Resistor|Capacitor|Inductor|Warburg => editability.insert(idx, ParameterEditability::Plural),
+            Cpe => {
                 editability.insert(idx, ParameterEditability::Plural);
                 editability.insert(idx, ParameterEditability::Plural);
             }
@@ -131,7 +114,7 @@ fn series_index_by_block(series: &[Circuit], block: (u16, u16)) -> Option<(usize
 
 fn parallel_painted_size(elems: &[Circuit]) -> (u16, u16) {
     let s = elems.iter()
-                 .map(|x| x.painted_size())
+                 .map(Circuit::painted_size)
                  .fold((0,0), |a, b| (std::cmp::max(a.0,b.0), a.1+b.1));
     (s.0 + 2, s.1)
 }
@@ -150,16 +133,16 @@ fn parallel_index_by_block(parallel: &[Circuit], block: (u16, u16)) -> ParallelB
             return ParallelBlockPicked::This;
         }
 
-        let xsize = parallel_painted_size(parallel).0;
+        let g_size = parallel_painted_size(parallel).0;
 
         let mut start_coord_y = 0_u16;
         for (i,el) in &mut parallel.iter().enumerate() {
             let elemsize = el.painted_size();
             if start_coord_y + elemsize.1 > block.1 {
-                let psize = el.painted_size().0;
-                let elemblock = (xsize-2-psize)/2 + 1;
+                let p_size = el.painted_size().0;
+                let elemblock = (g_size-2-p_size)/2 + 1;
 
-                if block.0 >= elemblock && block.0 < elemblock+psize {
+                if block.0 >= elemblock && block.0 < elemblock+p_size {
                     return ParallelBlockPicked::Child(i, elemblock, start_coord_y);
                 }
                 return ParallelBlockPicked::This;
@@ -172,29 +155,28 @@ fn parallel_index_by_block(parallel: &[Circuit], block: (u16, u16)) -> ParallelB
 
 /// Paint a sign under the element
 fn sign_element(ctx: &eframe::egui::Painter, text: &str, pos: Pos2, blocksize: f32, color: Color32) {
-    ctx.text(pos+vec2(blocksize, blocksize*3./2.), eframe::egui::Align2::CENTER_CENTER, text, eframe::egui::TextStyle::Body, color);
+    ctx.text(pos+vec2(blocksize, blocksize*3./2.), eframe::egui::Align2::CENTER_CENTER, text, eframe::egui::FontId{size: 12.0, family: eframe::egui::FontFamily::Proportional}, color);
 }
 
 
 impl Circuit {
     pub fn generate_new_params(&self) -> ParameterDesc {
         match self {
-            Circuit::Element(element) => {
+            Self::Element(element) => {
                 let pd = match element {
-                    Element::Resistor => {(100., (1., 100000.))},
-                    Element::Capacitor => {(0.000001, (0.000000001, 0.1))},
-                    Element::Inductor => {(0.000001, (0.000000001, 0.1))},
-                    Element::Warburg => {(10., (1., 100000.))},
-                    Element::Cpe => {
-                        return ParameterDesc{ vals: vec![0.8, 1e-6], bounds: vec![(0.01, 0.99), (0.000000001, 0.1)] };
+                    Resistor => {(100., (1., 1e5))},
+                    Capacitor|Inductor => {(1e-6, (1e-9, 0.1))},
+                    Warburg => {(10., (1., 1e5))},
+                    Cpe => {
+                        return ParameterDesc{ vals: vec![0.8, 1e-6], bounds: vec![(0.01, 0.99), (1e-9, 0.1)] };
                     },
                 };
                 ParameterDesc{ vals: vec![pd.0], bounds: vec![pd.1] }
             }
-            Circuit::Series(s)|Circuit::Parallel(s) => {
+            Self::Series(s)|Circuit::Parallel(s) => {
                 let mut evals = vec![];
                 let mut ebounds = vec![];
-                for ParameterDesc{mut vals, mut bounds} in s.iter().map(|x| x.generate_new_params()) {
+                for ParameterDesc{mut vals, mut bounds} in s.iter().map(Self::generate_new_params) {
                     evals.append(&mut vals);
                     ebounds.append(&mut bounds);
                 }
@@ -232,12 +214,12 @@ impl Circuit {
 
             Circuit::Series(elems) => 
                 elems.iter()
-                     .map(|x| x.painted_size())
+                     .map(Self::painted_size)
                      .fold((0,0), |a, b| (a.0+b.0, std::cmp::max(a.1,b.1))),
 
             Circuit::Parallel(elems) =>  {
                 let s = elems.iter()
-                             .map(|x| x.painted_size())
+                             .map(Self::painted_size)
                              .fold((0,0), |a, b| (std::cmp::max(a.0,b.0), a.1+b.1));
                 (s.0 + 2, s.1)
             }
@@ -263,11 +245,11 @@ impl Circuit {
                 start_index+1
             },
             Circuit::Element(Element::Inductor) => {
-                let mut spos = vec2(0., blocksize/2.);
+                let mut curr_pos = vec2(0., blocksize/2.);
 
                 let mut lineto = |newpos| {
-                    painter.line_segment([pos+spos, pos+newpos], stroke);
-                    spos = newpos;
+                    painter.line_segment([pos+curr_pos, pos+newpos], stroke);
+                    curr_pos = newpos;
                 };
 
                 lineto(vec2(blocksize/4., blocksize/2.));
@@ -319,11 +301,11 @@ impl Circuit {
 
             Circuit::Series(elems) => {
                 let mut index = elems[0].paint(pos, blocksize, painter, start_index, color);
-                let mut pos = pos + vec2(elems[0].painted_size().0 as f32 * blocksize, 0.);
+                let mut pos = pos + vec2(f32::from(elems[0].painted_size().0) * blocksize, 0.);
 
                 for c in elems[1..].iter() {
                     index = c.paint(pos, blocksize, painter, index, color);
-                    pos += vec2(c.painted_size().0 as f32 * blocksize, 0.);
+                    pos += vec2(f32::from(c.painted_size().0) * blocksize, 0.);
                 }
                 index
             }
@@ -334,24 +316,24 @@ impl Circuit {
                 let xsize = self.painted_size().0;
 
                 painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize, blocksize/2.)], stroke);
-                painter.line_segment([pos+vec2((xsize-1) as f32 * blocksize, blocksize/2.), pos+vec2(((xsize-1) as f32).mul_add(blocksize, blocksize), blocksize/2.)], stroke);
+                painter.line_segment([pos+vec2(f32::from(xsize-1) * blocksize, blocksize/2.), pos+vec2((f32::from(xsize-1)).mul_add(blocksize, blocksize), blocksize/2.)], stroke);
 
                 for c in elems.iter() {
-                    let psize = c.painted_size().0;
-                    let drawend =  (xsize as f32).mul_add(blocksize, pos.x);
-                    let elemblock = (xsize-2-psize)/2 + 1;
-                    let elemstart = (elemblock as f32).mul_add(blocksize, pos.x);
-                    let elemend = (psize as f32).mul_add(blocksize, elemstart);
+                    let painted_size = c.painted_size().0;
+                    let drawend = f32::from(xsize).mul_add(blocksize, pos.x);
+                    let elemblock = (xsize-2-painted_size)/2 + 1;
+                    let elemstart = f32::from(elemblock).mul_add(blocksize, pos.x);
+                    let elemend = f32::from(painted_size).mul_add(blocksize, elemstart);
                     index = c.paint(pos2(elemstart, y), blocksize, painter, index, color);
 
                     painter.line_segment([pos2(pos.x + blocksize/2., y+blocksize/2.), pos2(elemstart, y+blocksize/2.)], stroke);
-                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2((xsize as f32).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], stroke);
+                    painter.line_segment([pos2(elemend, y+blocksize/2.), pos2(f32::from(xsize).mul_add(blocksize, pos.x) - blocksize/2., y+blocksize/2.)], stroke);
 
                     painter.line_segment([pos+vec2(blocksize/2., blocksize/2.), pos2(pos.x + blocksize/2., y+blocksize/2.)], stroke);
 
                     painter.line_segment([pos2(drawend - blocksize/2., pos.y+blocksize/2.), pos2(drawend - blocksize/2., y+blocksize/2.)], stroke);
                     
-                    y += c.painted_size().1 as f32 * blocksize;
+                    y += f32::from(c.painted_size().1) * blocksize;
                 }
                 index
             }
@@ -360,13 +342,10 @@ impl Circuit {
 
     pub fn paramlen(&self) -> usize {
         match self {
-            Circuit::Element(Element::Resistor) => 1,
-            Circuit::Element(Element::Capacitor) => 1,
-            Circuit::Element(Element::Inductor) => 1,
-            Circuit::Element(Element::Warburg) => 1,
-            Circuit::Element(Element::Cpe) => 2,
+            Circuit::Element(Resistor|Capacitor|Inductor|Warburg) => 1,
+            Circuit::Element(Cpe) => 2,
             Circuit::Series(elems)|Circuit::Parallel(elems) => 
-                elems.iter().map(|x| x.paramlen()).sum(),
+                elems.iter().map(Self::paramlen).sum(),
         }
     }
 
@@ -495,7 +474,7 @@ impl Circuit {
                 if let Some((i, start_x)) = series_index_by_block(elems, coord) {
                     let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
                     let el = &mut elems[i];
-                    el._replace((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability)
+                    el._replace((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability);
                 }
             }
 
@@ -504,10 +483,8 @@ impl Circuit {
                 let ib = parallel_index_by_block(elems, coord);
 
                 match ib {
-                    ParallelBlockPicked::This => {
+                    ParallelBlockPicked::This | ParallelBlockPicked::None => {
                         // todo!()
-                    },
-                    ParallelBlockPicked::None => {
                     },
                     ParallelBlockPicked::Child(i, elemblock, start_y) => {
                         let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
@@ -520,7 +497,7 @@ impl Circuit {
     }
  
     pub fn replace(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
-        self._replace(coord, element, paramlist, 0, editability)
+        self._replace(coord, element, paramlist, 0, editability);
     }
 
     pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
@@ -542,7 +519,7 @@ impl Circuit {
                     }
                     else {
                         let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems[i]._add_series((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability)
+                        elems[i]._add_series((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability);
                     }
                 }
             }
@@ -572,7 +549,7 @@ impl Circuit {
                 assert!(elems.len() > 1);
                 if let Some((i, start_x)) = series_index_by_block(elems, coord) {
                     let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    elems[i]._add_parallel((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability)
+                    elems[i]._add_parallel((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability);
                 }
             }
 
@@ -642,10 +619,7 @@ impl Circuit {
                             elems[i]._remove((coord.0-elemblock, coord.1-start_y), paramlist, new_pidx, editability);
                         }
                     }
-                    ParallelBlockPicked::This => {
-                        
-                    }
-                    ParallelBlockPicked::None => {
+                    ParallelBlockPicked::This | ParallelBlockPicked::None => {
                         
                     }
                 }
