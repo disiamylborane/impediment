@@ -1,6 +1,5 @@
 #![warn(clippy::nursery)]
 #![warn(clippy::pedantic)]
-#![allow(clippy::blocks_in_if_conditions)]
 
 use float_pretty_print::PrettyPrintFloat;
 
@@ -131,7 +130,7 @@ impl Display for ImpOpenParam {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum PlotType {Nyquist, BodePhase, BodeAmp}
+pub enum PlotType {Nyquist, BodePhase, BodeAmp, AdmGodog}
 
 pub struct TemplateApp {
     pub fit_method: FitMethod,
@@ -811,10 +810,96 @@ impl epi::App for TemplateApp {
                         let optresult = opt.optimize(&mut paramlist.vals);
     
                         *text_status = match optresult {
-                            Ok((okstate, _)) => {
+                            Ok((okstate, val)) => {
                                 use nlopt::SuccessState::{FtolReached, MaxEvalReached, MaxTimeReached, StopValReached, Success, XtolReached};
                                 let res_str = match okstate {
-                                    Success | FtolReached | StopValReached | XtolReached => {"Fitting finished".into()}
+                                    Success | FtolReached | StopValReached | XtolReached => {format!("Fitting finished: {}", val)}
+                                    MaxEvalReached => {"Max evaluations reached".into()}
+                                    MaxTimeReached => {"Max time reached".into()}
+                                };
+
+                                str_params[*current_circ][*current_dataset] = paramlist.into();
+
+                                res_str
+                            }
+                            Err((failstate, _)) => {
+                                use nlopt::FailState::{Failure, ForcedStop, InvalidArgs, OutOfMemory, RoundoffLimited};
+                                match failstate {
+                                    Failure => {"Fitting failure".into()}
+                                    InvalidArgs => {"The parameter values exceed the bounds".into()}
+                                    OutOfMemory => {"Memory error".into()}
+                                    RoundoffLimited => {"Roundoff limited".into()}
+                                    ForcedStop => {"Forced stop of fitting".into()}
+                                }
+                            }
+                        };
+                        println!("{:?}", optresult);
+    
+                        lock_now = true;
+                    }
+                }
+
+                if ui.button("Fit log").clicked() {
+                    if let Ok(mut paramlist) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
+                        //let paramlist = &mut params[*current_circ][*current_dataset];
+                        let mut opt = nlopt::Nlopt::new(
+                            match fit_method {
+                                FitMethod::BOBYQA => nlopt::Algorithm::Bobyqa,
+                                FitMethod::TNC => nlopt::Algorithm::TNewton,
+                                FitMethod::SLSQP => nlopt::Algorithm::Slsqp,
+                                FitMethod::LBfgsB => nlopt::Algorithm::Lbfgs,
+                            }, 
+                            paramlist.vals.len(), 
+                            |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
+                                let circ = &models[*current_circ].circuit;
+                                if let Some(gout) = &mut gradient_out {
+                                    for i in 0..gout.len() {
+                                        gout[i] = 0.0;
+                                    }
+                                };
+                                let exps = &datasets[*current_dataset].0;
+    
+                                let mut loss = 0.0_f64;
+                                for point in exps {
+                                    let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
+                                    //let diff = ;
+                                    loss += (model_imp/point.imp).ln().norm_sqr();
+    
+                                    if let Some(gout) = &mut gradient_out {
+                                        for i in 0..gout.len() {
+                                            let dzdparam = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
+
+                                            let dzdparam1z = 1.0/model_imp * dzdparam;
+                                            let lnzz = (model_imp/point.imp).ln();
+                                            let d = dzdparam1z * lnzz.conj() + lnzz * dzdparam1z.conj();
+
+                                            // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
+
+                                            gout[i] += d.re;
+                                        }
+                                    };
+                                }
+                            
+                                loss
+                            },
+                            nlopt::Target::Minimize,
+                            (),
+                        );
+    
+                        opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
+                        opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
+                        opt.set_maxeval(u32::MAX).unwrap();
+                        opt.set_maxtime(10.0).unwrap();
+    
+                        opt.set_xtol_rel(1e-10).unwrap();
+    
+                        let optresult = opt.optimize(&mut paramlist.vals);
+    
+                        *text_status = match optresult {
+                            Ok((okstate, val)) => {
+                                use nlopt::SuccessState::{FtolReached, MaxEvalReached, MaxTimeReached, StopValReached, Success, XtolReached};
+                                let res_str = match okstate {
+                                    Success | FtolReached | StopValReached | XtolReached => {format!("Fitting finished: {}", val)}
                                     MaxEvalReached => {"Max evaluations reached".into()}
                                     MaxTimeReached => {"Max time reached".into()}
                                 };
@@ -985,6 +1070,9 @@ impl epi::App for TemplateApp {
                     else if ui.small_button("Bode Phase").clicked() {
                         *plot_type = PlotType::BodePhase;
                     }
+                    else if ui.small_button("AdmGodog").clicked() {
+                        *plot_type = PlotType::AdmGodog;
+                    }
                 );
 
                 let eplot_type = *plot_type;
@@ -996,6 +1084,7 @@ impl epi::App for TemplateApp {
                                     PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
                                     PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg().to_degrees()),
                                     PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
+                                    PlotType::AdmGodog => egui::plot::Value::new((1.0/d.imp).re, (1.0/d.imp).im),
                                 }
                             ).collect::<Vec<_>>() 
                         )
@@ -1031,11 +1120,12 @@ impl epi::App for TemplateApp {
                             PlotType::Nyquist => format!("{} Ohm\n{} Ohm", x, y),
                             PlotType::BodeAmp => format!("{} Hz:\n{} Ohm", 10.0_f64.powf(x), y),
                             PlotType::BodePhase => format!("{} Hz:\n{}°", 10.0_f64.powf(x), y),
+                            PlotType::AdmGodog => format!("{} Mho\n{} Mho", x, y),
                         }
                     })
                     .x_axis_formatter(move |v,_e| {
                         match eplot_type {
-                            PlotType::Nyquist => v.to_string(),
+                            PlotType::Nyquist|PlotType::AdmGodog => v.to_string(),
                             PlotType::BodePhase|PlotType::BodeAmp => (10.0_f64).powf(v).to_string(),
                         }
                     });
@@ -1050,6 +1140,7 @@ impl epi::App for TemplateApp {
                                 let imp = m.circuit.impedance(std::f64::consts::TAU*f, &cparams.vals);
                                 match plot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                                    PlotType::AdmGodog => egui::plot::Value::new((1.0/imp).re, (1.0/imp).im),
                                     PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg().to_degrees()),
                                     PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
                                 }
@@ -1061,6 +1152,7 @@ impl epi::App for TemplateApp {
                                 let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &cparams.vals);
                                 match plot_type {
                                     PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                                    PlotType::AdmGodog => egui::plot::Value::new((1.0/imp).re, (1.0/imp).im),
                                     PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg().to_degrees()),
                                     PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
                                 }
@@ -1072,6 +1164,7 @@ impl epi::App for TemplateApp {
                 });
 
                 ui.label(match plot_type{
+                    PlotType::AdmGodog => "Im Y vs Re Y",
                     PlotType::Nyquist => "-Im Z vs Re Z",
                     PlotType::BodeAmp => "|Z| vs freq",
                     PlotType::BodePhase => "arg Z vs freq",

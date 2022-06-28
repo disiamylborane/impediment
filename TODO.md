@@ -10,4 +10,4 @@ Further:
 
 - [ ] Quick data generation
 - [ ] Statistical analysis
-- [ ] Custom, more flexible plot
+- [x] Custom, more flexible plot
