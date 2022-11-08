@@ -6,7 +6,7 @@ use float_pretty_print::PrettyPrintFloat;
 use std::{fmt::Display, str::FromStr};
 
 use circuit::Circuit;
-use eframe::{egui::{self, Color32, Vec2, vec2, plot::Value}, epi};
+use eframe::{egui::{self, Color32, Vec2, vec2, plot::Value}};
 
 
 #[derive(Debug, Copy, Clone)]
@@ -174,7 +174,7 @@ impl TemplateApp {
         }
         writeln!(f)?;
         for (ip, ps_circ) in params.iter().enumerate() {
-            writeln!(f, "Paramlist for Circuit {}:", ip)?;
+            writeln!(f, "Paramlist for Circuit {ip}:")?;
             for ps in ps_circ {
                 write!(f, "{:?} with bounds [", ps.vals)?;
                 for b in &ps.bounds {
@@ -493,13 +493,13 @@ fn display_import_window(
 }
 
 
-impl epi::App for TemplateApp {
-    fn name(&self) -> &str {
+impl eframe::App for TemplateApp {
+    /*fn name(&self) -> &str {
         "Impediment"
-    }
+    }*/
 
     #[allow(clippy::too_many_lines)]
-    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_visuals(egui::Visuals::dark());
 
         let Self {
@@ -1188,7 +1188,7 @@ impl epi::App for TemplateApp {
         false
     }
 
-    fn on_exit(&mut self) {}
+    fn on_exit(&mut self, _ctx: &eframe::glow::Context) {}
 
     fn auto_save_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(30)
@@ -1198,7 +1198,7 @@ impl epi::App for TemplateApp {
         egui::Vec2::new(1024.0, 2048.0)
     }
 
-    fn clear_color(&self) -> egui::Rgba {
+    fn clear_color(&self, _: &egui::Visuals) -> egui::Rgba {
         egui::Color32::from_rgba_unmultiplied(12, 12, 12, 180).into()
     }
 }
@@ -1206,6 +1206,6 @@ impl epi::App for TemplateApp {
 fn main() {
     let app = TemplateApp::default();
     let native_options = eframe::NativeOptions{initial_window_size: Some(vec2(1100., 600.)), ..eframe::NativeOptions::default()};
-    eframe::run_native(Box::new(app), native_options);
+    eframe::run_native("Impediment", native_options, Box::new(|_| Box::new(app)));
 }
 

@@ -11,9 +11,9 @@ panic = 'abort'
 
 [dependencies]
 
-eframe = "0.17.0"
+eframe = "0.18.0"
 native-dialog = "0.6.3"
 num = "0.4.0"
 csv = "1.1.6"
-nlopt = "0.5.4"
+nlopt = "0.6.0"
 float-pretty-print = "0.1.1"
