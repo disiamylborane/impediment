@@ -26,9 +26,8 @@ pub enum ParameterType {
 impl ParameterType {
     fn name(&self) -> &str {
         match self {
-            ParameterType::Individual(x) => x,
-            ParameterType::GroupValue(x) => x,
-            ParameterType::GroupLinear { name, const_idx:_ } => name,
+            Self::Individual(x) | Self::GroupValue(x) => x,
+            Self::GroupLinear { name, const_idx:_ } => name,
         }
     }
 }
@@ -70,7 +69,7 @@ impl Model {
                     let cst = consts[const_idx];
                     let a = grp_vars[curr_grpvar];
                     let b = grp_vars[curr_grpvar+1];
-                    params.push(b.mul_add(cst, a));
+                    params.push(cst.mul_add(b, a));
                     curr_grpvar += 2;
                 },
             }
@@ -98,10 +97,11 @@ impl Model {
             }
         }
 
-        match self.param_types[param_idx] {
+        let ptype = &self.param_types[param_idx];
+
+        match ptype {
             ParameterType::Individual(_) => VarIndex::Ind(curr_indvar),
-            ParameterType::GroupValue(_) => VarIndex::Group(curr_grpvar),
-            ParameterType::GroupLinear { name:_, const_idx:_ } => VarIndex::Group(curr_grpvar),
+            ParameterType::GroupValue(_) | ParameterType::GroupLinear { name:_, const_idx:_ } => VarIndex::Group(curr_grpvar),
         }
     }
 
@@ -197,7 +197,7 @@ impl Model {
                     let mut job2 = egui::text::LayoutJob::default();
                     job2.append(letter, 0.0, egui::text::TextFormat{..Default::default()});
                     job2.append(name, 0.0, small_style(ui));
-                    job2.append(&format!("({})", const_idx), 0.0, egui::text::TextFormat{..Default::default()});
+                    job2.append(&format!("({const_idx})"), 0.0, egui::text::TextFormat{..Default::default()});
                     out.push(egui::Label::new(job2));
                 }
             }
@@ -301,10 +301,10 @@ fn dflt_grvars() -> Vec<Paramlist> {
 #[derive(Clone, Copy)]
 #[repr(u8)]
 enum UniqueID6bit {
-    Dataset = 0b10_1010,
-    Const = 0b10_1111,
-    IndividualVar = 0b00_0010,
-    GroupVar = 0b00_0011,
+    Dataset = 0b_10_1010,
+    Const = 0b_10_1111,
+    IndividualVar = 0b_00_0010,
+    GroupVar = 0b_00_0011,
 }
 
 
@@ -356,7 +356,17 @@ macro_rules! hinted_btn {
 
 fn insert_variable_editor(ctx: &egui::Context, ui: &mut egui::Ui, curr_value: &mut String, (i_param, param): (usize, &mut ModelVariable), lbl: egui::Label, hash_6bit: u8) {
     ui.horizontal(|ui| {
-        if ui.selectable_label(param.enabled, "·").clicked() {
+        let selabel = ui.selectable_label(param.enabled, "·");
+        let selabel = selabel.context_menu(|ui| {
+            if ui.button("Close the menu").clicked() {
+                ui.selectable_label(true, "Type1").clicked();
+                ui.selectable_label(false, "Type2").clicked();
+                ui.separator();
+                ui.selectable_label(true, "Other kind").clicked();
+            }
+        });
+
+        if selabel.clicked() {
             param.enabled = !param.enabled;
         }
 
@@ -377,7 +387,7 @@ fn insert_variable_editor(ctx: &egui::Context, ui: &mut egui::Ui, curr_value: &m
 
         let focus = ctx.memory().focus();
 
-        let min_id = egui::Id::new(i_param << 8 | 0 << 6 | (hash_6bit as usize));
+        let min_id = egui::Id::new(i_param << 8 | (hash_6bit as usize));
         let max_id = egui::Id::new(i_param << 8 | 1 << 6 | (hash_6bit as usize));
         let val_id = egui::Id::new(i_param << 8 | 2 << 6 | (hash_6bit as usize));
         value_editor(ui, focus, min_id, curr_value, wi/4.0, &mut param.bounds.0);

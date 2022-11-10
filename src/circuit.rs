@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 
 extern crate num;
 use std::{f64::consts::PI, vec};
@@ -25,7 +26,7 @@ use Element::{Capacitor, Inductor, Resistor, Warburg, Cpe};
 
 
 impl Element {
-    pub fn param_count(self) -> usize {
+    pub const fn param_count(self) -> usize {
         match self {
             Resistor|Capacitor|Inductor|Warburg => 1,
             Cpe => 2,
@@ -290,14 +291,14 @@ impl Circuit {
             }
             Self::Series(x) | Self::Parallel(x) => {
                 let mut curr_element = 0;
-                for (i, child) in x.iter_mut().enumerate() {
+                for child in x.iter_mut() {
                     let ch_len = child.element_count();
                     if idx < curr_element + ch_len {
                         match child {
-                            Circuit::Element(_) => {
+                            Self::Element(_) => {
                                 x.remove(idx);
                             }
-                            Circuit::Series(_)|Circuit::Parallel(_) => {
+                            Self::Series(_)|Self::Parallel(_) => {
                                 child.remove_element(idx-curr_element);
                             }
                         }
@@ -320,12 +321,11 @@ impl Circuit {
 
                 let mut i = 0;
                 while i < s.len() {
-                    if let Self::Series(x) = &s[i] {
-                        if let Self::Series(x) = s.remove(i) {
-                            for e in x.into_iter().rev() {
-                                s.insert(i, e);
-                            }
-                        } else {unreachable!()}
+                    if let Self::Series(_) = &s[i] {
+                        let Self::Series(x) = s.remove(i) else {unreachable!()};
+                        for e in x.into_iter().rev() {
+                            s.insert(i, e);
+                        }
                     }
                     i += 1;
                 }
@@ -341,12 +341,11 @@ impl Circuit {
 
                 let mut i = 0;
                 while i < s.len() {
-                    if let Self::Parallel(x) = &s[i] {
-                        if let Self::Parallel(x) = s.remove(i) {
-                            for e in x.into_iter().rev() {
-                                s.insert(i, e);
-                            }
-                        } else {unreachable!()}
+                    if let Self::Parallel(_) = &s[i] {
+                        let Self::Parallel(x) = s.remove(i) else {unreachable!()};
+                        for e in x.into_iter().rev() {
+                            s.insert(i, e);
+                        }
                     }
                     i += 1;
                 }
@@ -441,11 +440,11 @@ impl Circuit {
 
     pub fn param_names_rec(&self, mut start_index: usize) -> (Vec<String>, usize) {
         match self {
-            Self::Element(Element::Resistor) => (vec![format!("R{}", start_index)], start_index+1),
-            Self::Element(Element::Capacitor) => (vec![format!("C{}", start_index)], start_index+1),
-            Self::Element(Element::Inductor) => (vec![format!("L{}", start_index)], start_index+1),
-            Self::Element(Element::Warburg) => (vec![format!("W{}", start_index)], start_index+1),
-            Self::Element(Element::Cpe) => (vec![format!("Q{}", start_index), format!("n{}", start_index)], start_index+1),
+            Self::Element(Element::Resistor) => (vec![format!("R{start_index}")], start_index+1),
+            Self::Element(Element::Capacitor) => (vec![format!("C{start_index}")], start_index+1),
+            Self::Element(Element::Inductor) => (vec![format!("L{start_index}")], start_index+1),
+            Self::Element(Element::Warburg) => (vec![format!("W{start_index}")], start_index+1),
+            Self::Element(Element::Cpe) => (vec![format!("Q{start_index}"), format!("n{start_index}")], start_index+1),
             Self::Series(elems)|Self::Parallel(elems) => {
                 let mut out = vec![];
                 for e in elems {
