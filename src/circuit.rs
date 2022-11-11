@@ -4,7 +4,7 @@ extern crate num;
 use std::{f64::consts::PI, vec};
 use eframe::egui::{Color32, Pos2, Rect, Stroke, pos2, vec2};
 
-use crate::{Cplx};
+use crate::{Cplx, project::ModelVariable};
 
 #[derive(Debug, Clone)]
 pub struct ParameterDesc {
@@ -14,8 +14,9 @@ pub struct ParameterDesc {
 
 const I: Cplx = Cplx{ re: 0.0, im: 1.0 };
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
 pub enum Element {
+    #[default]
     Resistor,
     Capacitor,
     Inductor,
@@ -32,80 +33,20 @@ impl Element {
             Cpe => 2,
         }
     }
+
+    pub fn gen_individual_params(self) -> Vec<ModelVariable> {
+        match self {
+            Resistor => vec![ModelVariable{ val: 100., bounds: (1.0, 10000.0), enabled: true }],
+            Capacitor => vec![ModelVariable{ val: 100., bounds: (1e-6, 1.0), enabled: true }],
+            Inductor => vec![ModelVariable{ val: 1e-4, bounds: (1e-6, 1.0), enabled: true }],
+            Warburg => vec![ModelVariable{ val: 1e-4, bounds: (1e-6, 1.0), enabled: true }],
+            Cpe => vec![
+                ModelVariable{ val: 100., bounds: (1e-6, 1.0), enabled: true },
+                ModelVariable{ val: 0.8, bounds: (0.0, 1.0), enabled: true },
+            ],
+        }
+    }
 }
-
-
-/*
-impl Element {
-    fn exchange_param<'a>(self, element: Self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
-        for pdesc in paramlist {
-            match self {
-                Resistor|Capacitor|Inductor|Warburg => {pdesc.remove(idx);},
-                Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
-            }
-            match element {
-                Resistor => {pdesc.insert(idx, (100., (1., 1e5)))},
-                Capacitor|Inductor => {pdesc.insert(idx, (1e-6, (1e-9, 0.1)))},
-                Warburg => {pdesc.insert(idx, (10., (1., 1e5)))},
-                Cpe => {
-                    pdesc.insert(idx, (0.8, (0.01, 0.99)));
-                    pdesc.insert(idx, (1e-6, (1e-9, 0.1)));
-                },
-            }
-        }
-        match self {
-            Resistor|Capacitor|Inductor|Warburg => editability.remove(idx),
-            Cpe => {
-                editability.remove(idx);
-                editability.remove(idx)
-            }
-        };
-        match element {
-            Resistor|Capacitor|Inductor|Warburg => editability.insert(idx, ParameterEditability::Plural),
-            Cpe => {
-                editability.insert(idx, ParameterEditability::Plural);
-                editability.insert(idx, ParameterEditability::Plural);
-            }
-        }
-    }
-    fn remove_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
-        for pdesc in paramlist {
-                match self {
-                Resistor|Capacitor|Inductor|Warburg => {pdesc.remove(idx);},
-                Cpe => {pdesc.remove(idx); pdesc.remove(idx);},
-            }
-        }
-        match self {
-            Resistor|Capacitor|Inductor|Warburg => editability.remove(idx),
-            Cpe => {
-                editability.remove(idx);
-                editability.remove(idx)
-            }
-        };
-    }
-    fn insert_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
-        for pdesc in paramlist {
-            // @Refactor: Duplicate
-            match self {
-                Resistor => {pdesc.insert(idx, (100., (1., 1e5)))},
-                Capacitor|Inductor => {pdesc.insert(idx, (1e-6, (1e-9, 0.1)))},
-                Warburg => {pdesc.insert(idx, (10., (1., 1e5)))},
-                Cpe => {
-                    pdesc.insert(idx, (0.8, (0.01, 0.99)));
-                    pdesc.insert(idx, (1e-6, (1e-9, 0.1)));
-                },
-            }
-        }
-
-        match self {
-            Resistor|Capacitor|Inductor|Warburg => editability.insert(idx, ParameterEditability::Plural),
-            Cpe => {
-                editability.insert(idx, ParameterEditability::Plural);
-                editability.insert(idx, ParameterEditability::Plural);
-            }
-        }
-    }
-}*/
 
 #[derive(Clone, Debug)]
 pub enum Circuit {
@@ -283,34 +224,6 @@ impl Circuit {
         }
     }
 
-
-    pub fn remove_element(&mut self, idx: usize) {
-        match self {
-            Self::Element(_) => {
-                panic!("Can't remove from element")
-            }
-            Self::Series(x) | Self::Parallel(x) => {
-                let mut curr_element = 0;
-                for child in x.iter_mut() {
-                    let ch_len = child.element_count();
-                    if idx < curr_element + ch_len {
-                        match child {
-                            Self::Element(_) => {
-                                x.remove(idx);
-                            }
-                            Self::Series(_)|Self::Parallel(_) => {
-                                child.remove_element(idx-curr_element);
-                            }
-                        }
-                        return;
-                    }
-                    curr_element += ch_len;
-                }
-            }
-        }
-    }
-
-
     pub fn simplify(&mut self) {
         match self {
             Self::Element(_) => {}
@@ -356,66 +269,6 @@ impl Circuit {
             }
         }
     }
-
-
-    /*pub fn element_index_by_block(&self, block: (u16, u16)) -> Option<usize> {
-        match self {
-            Circuit::Element(e) => if block == (0,0) || block == (1,0) {Some(0)} else {None},
-            Circuit::Series(s) => {
-                let mut start_x = 0_u16;
-                let mut prev_count = 0;
-                for (i, el) in s.iter().enumerate() {
-                    let elemsize = el.painted_size();
-                    if start_x + elemsize.0 > block.0 { 
-                        if block.1 < elemsize.1 {
-                            return el.element_index_by_block((block.0-start_x, block.1)).map(|x| prev_count + x);
-                        }
-                        return None;
-                    }
-                }
-
-                None
-                /*let mut start_x = 0_u16;
-                for (i, el) in &mut series.iter().enumerate() {
-                    let elemsize = el.painted_size();
-                    if start_x + elemsize.0 > block.0 {
-                        if block.1 < elemsize.1 {
-                            return Some((i, start_x));
-                        }
-                        return None;
-                    }
-                    start_x += elemsize.0;
-                }
-                None*/
-            }
-            Circuit::Parallel(p) => todo!(),
-        }
-    }
-
-    pub fn generate_new_params(&self) -> ParameterDesc {
-        match self {
-            Self::Element(element) => {
-                let pd = match element {
-                    Resistor => {(100., (1., 1e5))},
-                    Capacitor|Inductor => {(1e-6, (1e-9, 0.1))},
-                    Warburg => {(10., (1., 1e5))},
-                    Cpe => {
-                        return ParameterDesc{ vals: vec![0.8, 1e-6], bounds: vec![(0.01, 0.99), (1e-9, 0.1)] };
-                    },
-                };
-                ParameterDesc{ vals: vec![pd.0], bounds: vec![pd.1] }
-            }
-            Self::Series(s) | Self::Parallel(s) => {
-                let mut evals = vec![];
-                let mut ebounds = vec![];
-                for ParameterDesc{mut vals, mut bounds} in s.iter().map(Self::generate_new_params) {
-                    evals.append(&mut vals);
-                    ebounds.append(&mut bounds);
-                }
-                ParameterDesc{vals: evals, bounds: ebounds}
-            },
-        }
-    }*/
 
     pub fn param_letters(&self) -> Vec<&str> {
         match self {
@@ -475,7 +328,7 @@ impl Circuit {
         }
     }
 
-    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32, names: &[crate::ParameterType])->usize {
+    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32, names: &[crate::project::ParameterDescriptor])->usize {
         let stroke = Stroke::new(1., color);
         match self {
             Self::Element(Element::Resistor) => {
@@ -703,185 +556,178 @@ impl Circuit {
             }
         }
     }
-
-/*
-    pub fn _replace<'a>(&mut self, 
-                coord: (u16, u16), 
-                element: Element, 
-                paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, 
-                param_idx: usize,
-                editability: &mut Vec<ParameterEditability>) {
-        match self {
-            Self::Element(e) => {
-                e.exchange_param(element, param_idx, paramlist, editability);
-                editability[param_idx] = ParameterEditability::Plural;
-                *self = Self::Element(element);
-            },
-
-            Self::Series(elems) => {
-                assert!(elems.len() > 1);
-                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
-                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    let el = &mut elems[i];
-                    el._replace((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability);
-                }
-            }
-
-            Self::Parallel(elems) => {
-                assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(elems, coord);
-
-                match ib {
-                    ParallelBlockPicked::This | ParallelBlockPicked::None => {
-                        // todo!()
-                    },
-                    ParallelBlockPicked::Child(i, elemblock, start_y) => {
-                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        let el = &mut elems[i];
-                        el._replace((coord.0 - elemblock, coord.1 - start_y), element, paramlist, new_pidx, editability);
-                    }
-                }
-            }
-        }
-    }
- 
-    pub fn replace(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
-        self._replace(coord, element, paramlist, 0, editability);
-    }
-*/
-
-
-
-    /*pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
-        match self {
-            Self::Element(e) => {
-                let new = Self::Series(vec![Self::Element(*e), Self::Element(element)]);
-                let paramlen = self.paramlen();
-                element.insert_param(param_idx+paramlen, paramlist, editability);
-                *self = new;
-            },
-
-            Self::Series(elems) => {
-                assert!(elems.len() > 1);
-                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
-                    if let Self::Element(_) = elems[i] {
-                        let new_pidx = param_idx + (0..=i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems.insert(i+1, Self::Element(element));
-                        element.insert_param(new_pidx, paramlist, editability);
-                    }
-                    else {
-                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems[i]._add_series((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability);
-                    }
-                }
-            }
-
-            Self::Parallel(elems) => {
-                assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(elems, coord);
-
-                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
-                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    elems[i]._add_series((coord.0-elemblock, coord.1-start_y), element, paramlist, new_pidx, editability);
-                }
-            }
-        }
-    }*/
-
-
-/*
-    pub fn _add_parallel(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
-        match self {
-            Self::Element(e) => {
-                let new = Self::Parallel(vec![Self::Element(*e), Self::Element(element)]);
-                let paramlen = self.paramlen();
-                element.insert_param(param_idx+paramlen, paramlist, editability);
-                *self = new;
-            },
-
-            Self::Series(elems) => {
-                assert!(elems.len() > 1);
-                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
-                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    elems[i]._add_parallel((coord.0 - start_x, coord.1), element, paramlist, new_pidx, editability);
-                }
-            }
-
-            Self::Parallel(elems) => {
-                assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(elems, coord);
-
-                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
-                    if let Self::Element(_) = elems[i] {
-                        let new_pidx = param_idx + (0..=i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems.insert(i+1, Self::Element(element));
-                        element.insert_param(new_pidx, paramlist, editability);
-                    }
-                    else {
-                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems[i]._add_parallel((coord.0-elemblock, coord.1-start_y), element, paramlist, new_pidx, editability);
-                    }
-                }
-            }
-        }
-    }
-
-
-    pub fn _remove(&mut self, coord: (u16, u16), paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>) {
-        match self {
-            Self::Element(_) => {},
-
-            Self::Series(elems) => {
-                assert!(elems.len() > 1);
-                
-                if let Some((i,start_x)) = series_index_by_block(elems, coord) {
-                    let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    let elemlen = elems.len();
-                    if let Self::Element(el) = &mut elems[i] {
-                        el.remove_param(new_pidx, paramlist, editability);
-                        if elemlen == 2 {
-                            *self = elems[if i == 0 {1} else {0}].clone();
-                        }
-                        else {
-                            elems.remove(i);
-                        }
-                    }
-                    else {
-                        elems[i]._remove((coord.0 - start_x, coord.1), paramlist, new_pidx, editability);
-                    }
-                }
-            }
-
-            Self::Parallel(elems) => {
-                assert!(elems.len() > 1);
-                let ib = parallel_index_by_block(elems, coord);
-
-                match ib {
-                    ParallelBlockPicked::Child(i, elemblock, start_y) => {
-                        let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        let elemlen = elems.len();
-                        if let Self::Element(el) = &mut elems[i] {
-                            el.remove_param(new_pidx, paramlist, editability);
-                            if elemlen == 2 {
-                                *self = elems[if i == 0 {1} else {0}].clone();
-                            }
-                            else {
-                                elems.remove(i);
-                            }
-                        }
-                        else {
-                            elems[i]._remove((coord.0-elemblock, coord.1-start_y), paramlist, new_pidx, editability);
-                        }
-                    }
-                    ParallelBlockPicked::This | ParallelBlockPicked::None => {
-                        
-                    }
-                }
-            }
-        }
-    }*/
 }
 
+
+use std::ops::Range;
+pub struct ParameterRanger {
+    param_start: usize,
+    param_old_count: usize,
+}
+
+
+impl Circuit {
+    pub fn replace_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<Range<usize>> {
+        self._replace_element(coord, new_element, 0)
+    }
+
+    pub fn _replace_element(&mut self, coord: (u16, u16), new_element: Element, prev_param: usize) -> Option<Range<usize>> {
+        match self {
+            &mut Circuit::Element(e) => {
+                *self = Self::Element(new_element);
+                (prev_param..(prev_param+e.param_count())).into()
+            }
+            Circuit::Series(elems) => {
+                assert!(elems.len() > 1);
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                    let el = &mut elems[i];
+                    el._replace_element((coord.0 - start_x, coord.1), new_element, new_pidx)
+                }
+                else {None}
+            }
+            Circuit::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+
+                match ib {
+                    ParallelBlockPicked::This | ParallelBlockPicked::None => {
+                        None
+                    },
+                    ParallelBlockPicked::Child(i, elemblock, start_y) => {
+                        let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        let el = &mut elems[i];
+                        el._replace_element((coord.0 - elemblock, coord.1 - start_y), new_element, new_pidx)
+                    }
+                }
+            }
+        }
+    }
+
+
+    pub fn add_series_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<usize> {
+        self._add_series_element(coord, new_element, 0)
+    }
+
+    pub fn _add_series_element(&mut self, coord: (u16, u16), new_element: Element, prev_param: usize) -> Option<usize> {
+        let out: Option<usize> = match self {
+            Self::Element(e) => {
+                let new_param = prev_param+e.param_count();
+                *self = Self::Series(vec![Self::Element(*e), Self::Element(new_element)]);
+                new_param.into()
+            },
+
+            Self::Series(elems) => {
+                assert!(elems.len() > 1);
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    {
+                        let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        elems[i]._add_series_element((coord.0 - start_x, coord.1), new_element, new_pidx)
+                    }
+                } else {None}
+            }
+
+            Self::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+
+                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                    elems[i]._add_series_element((coord.0-elemblock, coord.1-start_y), new_element, new_pidx)
+                } else {None}
+            }
+        };
+
+        self.simplify();
+
+        out
+    }
+
+
+    pub fn add_parallel_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<usize> {
+        self._add_parallel_element(coord, new_element, 0)
+    }
+
+    pub fn _add_parallel_element(&mut self, coord: (u16, u16), new_element: Element, prev_param: usize) -> Option<usize> {
+        let out: Option<usize> = match self {
+            Self::Element(e) => {
+                let new_param = prev_param+e.param_count();
+                *self = Self::Parallel(vec![Self::Element(*e), Self::Element(new_element)]);
+                new_param.into()
+            },
+
+            Self::Series(elems) => {
+                assert!(elems.len() > 1);
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    {
+                        let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                        elems[i]._add_parallel_element((coord.0 - start_x, coord.1), new_element, new_pidx)
+                    }
+                } else {None}
+            }
+
+            Self::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+
+                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+                    elems[i]._add_parallel_element((coord.0-elemblock, coord.1-start_y), new_element, new_pidx)
+                } else {None}
+            }
+        };
+
+        self.simplify();
+
+        out
+    }
+
+
+
+    pub fn delete_element(&mut self, coord: (u16, u16)) -> Option<Range<usize>> {
+        self._delete_element(coord, 0)
+    }
+
+    pub fn _delete_element(&mut self, coord: (u16, u16), prev_param: usize) -> Option<Range<usize>> {
+        let out = match self {
+            Circuit::Element(_) => {None}
+            Circuit::Series(elems) => {
+                assert!(elems.len() > 1);
+
+                if let Some((i, start_x)) = series_index_by_block(elems, coord) {
+                    let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+
+                    match &elems[i] {
+                        &Circuit::Element(e) => {elems.remove(i); (new_pidx..(new_pidx+e.param_count())).into()},
+                        Circuit::Series(_)|Circuit::Parallel(_) => {
+                            elems[i]._delete_element((coord.0 - start_x, coord.1), new_pidx)
+                        }
+                    }
+
+                } else {None}
+
+            }
+            Circuit::Parallel(elems) => {
+                assert!(elems.len() > 1);
+                let ib = parallel_index_by_block(elems, coord);
+                
+                if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
+
+                    match &elems[i] {
+                        &Circuit::Element(e) => {elems.remove(i); (new_pidx..(new_pidx+e.param_count())).into()},
+                        Circuit::Series(_)|Circuit::Parallel(_) => {
+                            elems[i]._delete_element((coord.0-elemblock, coord.1-start_y), new_pidx)
+                        }
+                    }
+
+                } else {None}
+            }
+        };
+        self.simplify();
+        out
+    }
+}
 
 
 impl std::fmt::Display for Circuit {
