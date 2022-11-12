@@ -34,6 +34,9 @@ pub struct ModelVariable {
     // The variable is enabled to vary in fitting process
     pub enabled: bool,
 }
+impl ModelVariable {
+    pub const fn new_unknown() -> Self {Self { val: 1.0, bounds: (1e-4, 1e4), enabled: true }}
+}
 
 
 #[derive(Debug, Clone)]
@@ -180,7 +183,31 @@ impl Model {
         }
         out
     }
-    
+
+    pub fn build_params(&self, inds: &[ModelVariable], grps: &[ModelVariable]) -> Vec<f64> {
+        let mut out = vec![];
+
+        let mut ind_var = 0;
+        let mut grp_var = 0;
+
+        for param in &self.params {
+            match param {
+                ParameterDescriptor::Individual(_) => {
+                    out.push(inds[ind_var].val);
+                    ind_var += 1;
+                }
+                ParameterDescriptor::Group(_, GroupParameterType::Value) => {
+                    out.push(grps[grp_var].val);
+                    grp_var += 1;
+                }
+                ParameterDescriptor::Group(_, GroupParameterType::Linear(_)) => {
+                    todo!()
+                }
+            }
+        }
+
+        out
+    }
 }
 
 

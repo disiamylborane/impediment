@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 use circuit::Element;
 use eframe::{egui::{self, Ui, Widget}, epaint::Color32};
 use egui::vec2;
@@ -285,13 +287,14 @@ fn render_dataset_box(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action>
         }
         if hinted_btn(ui, "-", "Remove current dataset") {
         }
-    });
+        Ok(())
+    }).inner?;
 
     ui.push_id("ScrollData", |ui| {
         egui::ScrollArea::both().show(ui, |ui|->Result<(), Action> {
             egui::Grid::new("datagrid").min_col_width(60.0).show(ui, |ui| {
                 if let Some(vlen) = iapp.prjdata.dataset.iter().map(|sgroup| sgroup.spectra.len()).max() {
-                    for i in 0..vlen {
+                    for i in 0..(vlen+1) {
                         for (dkidx, sgroup) in iapp.prjdata.dataset.iter_mut().enumerate() {
                             if let Some(ds) = sgroup.spectra.get_mut(i) {
                                 let old_name = ds.name.clone();
@@ -299,7 +302,30 @@ fn render_dataset_box(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action>
                                 let tedit = egui::TextEdit::singleline(&mut ds.name);
                                 let tedit = if iapp.editor_variables.current_spectrum==Some((dkidx,i)) {tedit.text_color(Color32::RED)} else {tedit};
 
-                                let tres = ui.add(tedit);
+                                let mut duplicate = false;
+                                let mut delete = false;
+                                let tres = ui.add(tedit).context_menu(|ui| {
+                                    if ui.button("Duplicate").clicked() {
+                                        duplicate = true;
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Delete").clicked() {
+                                        delete = true;
+                                        ui.close_menu();
+                                    }
+                                });
+                                if duplicate {
+                                    let d_old = iapp.prjdata.clone();
+                                    let n_clone = iapp.prjdata.dataset[dkidx].spectra[i].clone();
+                                    iapp.prjdata.dataset[dkidx].spectra.push(n_clone);
+                                    return Err(Action::Unknown(Box::new(d_old)));
+                                }
+                                if delete {
+                                    let d_old = iapp.prjdata.clone();
+                                    iapp.prjdata.dataset[dkidx].spectra.remove(i);
+                                    iapp.editor_variables.current_spectrum = None;
+                                    return Err(Action::Unknown(Box::new(d_old)));
+                                }
 
                                 if tres.clicked() {
                                     iapp.editor_variables.current_spectrum = Some((dkidx, i));
@@ -309,7 +335,24 @@ fn render_dataset_box(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action>
                                     return Err(Action::EditSpectrumName { idx: (dkidx, i), name: old_name });
                                 }
                             }
+                            else if i == sgroup.spectra.len() {
+                                if ui.button("+").clicked() {
+                                    let d_old = iapp.prjdata.clone();
+                                    let constants = vec![0.0; iapp.prjdata.constants.len()];
+                                    let ind_params = iapp.prjdata.models
+                                        .iter()
+                                        .map(|mdl| vec![project::ModelVariable::new_unknown(); mdl.get_individual_vars(ui).len()])
+                                        .collect();
+                                    iapp.prjdata.dataset[dkidx].spectra.push(project::Spectrum{ points: vec![], name: "New spec".to_string(), ind_params, constants });
+                                    return Err(Action::Unknown(Box::new(d_old)));
+                                }
+                            }
+                            else {
+                                ui.label("");
+                            }
                         }
+
+                        ui.end_row();
                     }
                 }
                 Ok(())
@@ -329,11 +372,15 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
         .width(ui.available_width())
         .height(ui.available_height()/2.0);
     
-    if let Some(spectrum) = iapp.editor_variables.current_spectrum.map(|(k,s)| &mut iapp.prjdata.dataset[k].spectra[s]) {
-        let extractor = |datapoint: &DataPoint| egui::plot::Value::new(datapoint.imp.re, -datapoint.imp.im);
+    let mut pltshow = vec![];
+    let mut pltlines = vec![];
+    let freqrange = 0.01..10000.0;
+    let extractor = |datapoint: DataPoint| egui::plot::Value::new(datapoint.imp.re, -datapoint.imp.im);
 
-        let actives = spectrum.points.iter().filter(|&datapoint| datapoint.enabled).map(extractor);
-        let passives = spectrum.points.iter().filter(|&datapoint| !datapoint.enabled).map(extractor);
+    if let Some((k,s)) = iapp.editor_variables.current_spectrum {
+        let spectrum = &mut iapp.prjdata.dataset[k].spectra[s];
+        let actives = spectrum.points.iter().filter(|&datapoint| datapoint.enabled).cloned().map(extractor);
+        let passives = spectrum.points.iter().filter(|&datapoint| !datapoint.enabled).cloned().map(extractor);
 
         let active_points = egui::plot::Points::new(
             egui::plot::Values::from_values_iter(actives)
@@ -348,26 +395,66 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
         .color(Color32::WHITE)
         .radius(4.);
 
-        plt.show(ui, |plot_ui| {
-            plot_ui.points(active_points);
-            plot_ui.points(passive_points);
-        });
+        pltshow.push(active_points);
+        pltshow.push(passive_points);
+
+        if let Some(cc) = iapp.editor_variables.current_circ {
+            let mdl = &iapp.prjdata.models[cc];
+            let freqs = geomspace(freqrange.start, freqrange.end, 500);
+
+            let grps = &iapp.prjdata.dataset[k].group_vars[cc];
+            let inds = &iapp.prjdata.dataset[k].spectra[s].ind_params[cc];
+
+            let params = mdl.build_params(inds, grps);
+
+            let points = freqs.map(|freq| DataPoint{freq, imp: mdl.circuit.impedance(2.*PI*freq, &params), enabled:true}).map(extractor);
+
+            let line = egui::plot::Line::new(egui::plot::Values::from_values_iter(points)).stroke((0.5, Color32::WHITE));
+            pltlines.push(line);
+        }
     }
+
+    plt.show(ui, |plot_ui| {
+        for pts in pltshow {
+            plot_ui.points(pts);
+        }
+        for pts in pltlines {
+            plot_ui.line(pts);
+        }
+    });
 
     Ok(())
 }
 
-
+pub fn geomspace(first: f64, last: f64, count: u32) -> impl Iterator<Item=f64>
+{
+    let (lf, ll) = (first.ln(), last.ln());
+    let delta = (ll - lf) / f64::from(count-1);
+    (0..count).map(move |i| (f64::from(i).mul_add(delta, lf)).exp())
+}
 
 fn render_data_editor(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
     let focus = ctx.memory().focus();
 
     if let Some((k,s)) = iapp.editor_variables.current_spectrum {
         let spectrum = &mut iapp.prjdata.dataset[k].spectra[s];
+        let mut delete_it = None;
 
         for (i_point, point) in spectrum.points.iter_mut().enumerate() {
             ui.horizontal(|ui| {
-                ui.selectable_label(point.enabled, "·").clicked();
+                if ui.selectable_label(point.enabled, "·").context_menu(|ui|{
+                    if ui.button("Delete").clicked() {
+                        delete_it = Some(i_point);
+                        ui.close_menu();
+                    }    
+                }).clicked() {
+                    point.enabled = !point.enabled;
+                }
+
+                if delete_it.is_some() {
+                    return Ok(());
+                }
+
                 let desired_width = (ui.available_width() - 30.0)/3.0;  // Magic numbers
 
                 let freq_id = egui::Id::new(i_point << 8 | 0b_1010_0000);
@@ -381,13 +468,38 @@ fn render_data_editor(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp
                 }
 
                 let im_id = egui::Id::new(i_point << 8 | 0b_1010_0010);
-                if let Err(old_val) = value_editor(ui, im_id, focus==Some(re_id), &mut iapp.edit_buffer, desired_width, &mut point.imp.im) {
+                if let Err(old_val) = value_editor(ui, im_id, focus==Some(im_id), &mut iapp.edit_buffer, desired_width, &mut point.imp.im) {
                     return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Im, value: old_val });
                 }
 
                 Ok(())
             }).inner?;
+
+            if let Some(di) = delete_it {
+                let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
+                iapp.prjdata.dataset[k].spectra[s].points.remove(di);
+                return Err(d);
+            }
         }
+
+        ui.horizontal(|ui| {
+            if ui.button("+").clicked() {
+                let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
+                let dp_default = DataPoint { freq: 1.0, imp: Cplx{re:0.0,im:0.0}, enabled: true };
+                let pts = &mut iapp.prjdata.dataset[k].spectra[s].points;
+                pts.push(pts.last().cloned().unwrap_or(dp_default));
+                return Err(d);
+            }
+
+            if ui.button("Sort").clicked() {
+                let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
+                let pts = &mut iapp.prjdata.dataset[k].spectra[s].points;
+                pts.sort_unstable_by(|a,b| a.freq.partial_cmp(&b.freq).unwrap_or(std::cmp::Ordering::Equal) );
+                return Err(d);
+            }
+
+            Ok(())
+        }).inner?;
     }
     Ok(())
 }
@@ -429,7 +541,9 @@ fn render_ind_params(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)
 
         for (i_ind, (name, val)) in names.into_iter().zip(vals.iter_mut()).enumerate() {
             ui.horizontal(|ui| {
-                ui.selectable_label(val.enabled, "·").clicked();
+                if ui.selectable_label(val.enabled, "·").clicked() {
+                    val.enabled = !val.enabled;
+                }
                 ui.add(name);
 
                 let wi = ui.available_width() - 100.0;  // Magic numbers
@@ -470,7 +584,10 @@ fn render_grp_vars(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->
 
         for (i_grvar, (name, val)) in names.into_iter().zip(vals.iter_mut()).enumerate() {
             ui.horizontal(|ui| {
-                ui.selectable_label(val.enabled, "·").clicked();
+                if ui.selectable_label(val.enabled, "·").clicked() {
+                    val.enabled = !val.enabled;
+                }
+
                 ui.add(name);
 
                 let wi = ui.available_width() - 100.0;  // Magic numbers
