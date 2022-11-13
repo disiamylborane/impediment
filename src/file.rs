@@ -3,7 +3,7 @@ extern crate csv;
 fn rec_to_datapiece(
     rec: &csv::StringRecord,
     params: (crate::FreqOpenParam, crate::ImpOpenParam, usize, usize, usize, usize)
-) -> Option<crate::DataPiece> {
+) -> Option<crate::DataPoint> {
     let freq_d = rec.get(params.2)?.to_string().replace(',', ".").parse::<f64>().ok()?;
     let rp1 = rec.get(params.3)?.to_string().replace(',', ".").parse::<f64>().ok()?;
     let rp2 = rec.get(params.4)?.to_string().replace(',', ".").parse::<f64>().ok()?;
@@ -21,13 +21,14 @@ fn rec_to_datapiece(
         crate::ImpOpenParam::MinusKohm => {crate::Cplx::new(rp1*1000., -rp2*1000.)}
     };
 
-    Some(crate::DataPiece{freq, imp})
+    Some(crate::DataPoint{freq, imp, enabled:true})
 }
 
 pub fn csv_to_impediment(
+    //od: &crate::ImportModule,
     text: &str,
     params: (crate::FreqOpenParam, crate::ImpOpenParam, usize, usize, usize, usize),
-) -> Option<Vec<crate::DataPiece>> {
+) -> Option<Vec<crate::DataPoint>> {
     csv_to_impediment_delim(text, params, b';')
         .or_else(||csv_to_impediment_delim(text, params, b','))
 }
@@ -37,7 +38,7 @@ pub fn csv_to_impediment_delim(
             text: &str,
             params: (crate::FreqOpenParam, crate::ImpOpenParam, usize, usize, usize, usize),
             delim: u8
-) -> Option<Vec<crate::DataPiece>> {
+) -> Option<Vec<crate::DataPoint>> {
     let mut rdr = csv::ReaderBuilder::new().delimiter(delim).from_reader(text.as_bytes());
 
     let mut out = Vec::with_capacity(32);

@@ -270,19 +270,31 @@ impl Circuit {
         }
     }
 
-    pub fn param_letters(&self) -> Vec<&str> {
+    // Param name + component index
+    pub fn param_letters(&self) -> Vec<(&'static str, usize)> {
+        self._param_letters(0)
+    }
+
+    pub fn _param_letters(&self, start_index: usize) -> Vec<(&'static str, usize)> {
         match self {
             Self::Element(el) => {
                 match el {
-                    Resistor => { vec!["R"] }
-                    Capacitor => { vec!["C"] }
-                    Inductor => { vec!["L"] }
-                    Warburg => { vec!["W"] }
-                    Cpe => { vec!["Q", "n"] }
+                    Resistor => { vec![("R", start_index)] }
+                    Capacitor => { vec![("C", start_index)] }
+                    Inductor => { vec![("L", start_index)] }
+                    Warburg => { vec![("W", start_index)] }
+                    Cpe => { vec![("Q", start_index), ("n", start_index)] }
                 }
             }
             Self::Series(elems) | Self::Parallel(elems) => {
-                elems.iter().fold(vec![], |mut x, y| {x.append(&mut y.param_letters()); x})
+                let mut out = vec![];
+                let mut ni = start_index;
+                for el in elems {
+                    let mut children = el._param_letters(ni);
+                    ni += children.len();
+                    out.append(&mut children);
+                }
+                out
             }
         }
     }
@@ -328,14 +340,14 @@ impl Circuit {
         }
     }
 
-    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32, names: &[crate::project::ParameterDescriptor])->usize {
+    pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32, names: &[String])->usize {
         let stroke = Stroke::new(1., color);
         match self {
             Self::Element(Element::Resistor) => {
                 painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize/4., blocksize/2.)], stroke);
                 painter.rect_stroke(Rect::from_min_size(pos+vec2(blocksize/4., blocksize/4.), vec2(blocksize*3./2., blocksize/2.)), 0., stroke);
                 painter.line_segment([pos+vec2(blocksize*7./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
-                sign_element(painter, &format!("R{}", names[start_index].name()), pos, blocksize, color);
+                sign_element(painter, &format!("R{}", &names[start_index]), pos, blocksize, color);
                 start_index+1
             }
             Self::Element(Element::Capacitor) => {
@@ -343,7 +355,7 @@ impl Circuit {
                 painter.line_segment([pos+vec2(blocksize*3./4., 0.), pos+vec2(blocksize*3./4., blocksize)], stroke);
                 painter.line_segment([pos+vec2(blocksize*5./4., 0.), pos+vec2(blocksize*5./4., blocksize)], stroke);
                 painter.line_segment([pos+vec2(blocksize*5./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
-                sign_element(painter, &format!("C{}", names[start_index].name()), pos, blocksize, color);
+                sign_element(painter, &format!("C{}", &names[start_index]), pos, blocksize, color);
                 start_index+1
             },
             Self::Element(Element::Inductor) => {
@@ -366,7 +378,7 @@ impl Circuit {
                 lineto(vec2(blocksize*21./12., blocksize/2.));
                 lineto(vec2(blocksize*2., blocksize/2.));
 
-                sign_element(painter, &format!("L{}", names[start_index].name()), pos, blocksize, color);
+                sign_element(painter, &format!("L{}", &names[start_index]), pos, blocksize, color);
                 start_index+1
             }
 
@@ -381,7 +393,7 @@ impl Circuit {
                 line(vec2(1.25, 0.5), vec2(1.5, 1.0));
                 line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                sign_element(painter, &format!("W{}", names[start_index].name()), pos, blocksize, color);
+                sign_element(painter, &format!("W{}", &names[start_index]), pos, blocksize, color);
                 start_index+1
             }
 
@@ -397,7 +409,7 @@ impl Circuit {
                 line(vec2(1.25, 0.5), vec2(1.5, 1.0));
                 line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                sign_element(painter, &format!("Z{}", names[start_index].name()), pos, blocksize, color);
+                sign_element(painter, &format!("Z{}", &names[start_index]), pos, blocksize, color);
                 start_index+1
             }
 
@@ -605,24 +617,26 @@ impl Circuit {
     }
 
 
-    pub fn add_series_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<usize> {
-        self._add_series_element(coord, new_element, 0)
+    pub fn add_series_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<(usize, usize)> {
+        self._add_series_element(coord, new_element, 0, 0)
     }
 
-    pub fn _add_series_element(&mut self, coord: (u16, u16), new_element: Element, prev_param: usize) -> Option<usize> {
-        let out: Option<usize> = match self {
+    pub fn _add_series_element(&mut self, coord: (u16, u16), new_element: Element, prev_component: usize, prev_param: usize) -> Option<(usize, usize)> {
+        let out: Option<(usize, usize)> = match self {
             Self::Element(e) => {
+                let new_cmp = prev_component + 1;
                 let new_param = prev_param+e.param_count();
                 *self = Self::Series(vec![Self::Element(*e), Self::Element(new_element)]);
-                new_param.into()
+                (new_cmp, new_param).into()
             },
 
             Self::Series(elems) => {
                 assert!(elems.len() > 1);
                 if let Some((i, start_x)) = series_index_by_block(elems, coord) {
                     {
+                        let new_cmp = prev_component+i;
                         let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems[i]._add_series_element((coord.0 - start_x, coord.1), new_element, new_pidx)
+                        elems[i]._add_series_element((coord.0 - start_x, coord.1), new_element, new_cmp, new_pidx)
                     }
                 } else {None}
             }
@@ -632,8 +646,9 @@ impl Circuit {
                 let ib = parallel_index_by_block(elems, coord);
 
                 if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    let new_cmp = prev_component+i;
                     let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    elems[i]._add_series_element((coord.0-elemblock, coord.1-start_y), new_element, new_pidx)
+                    elems[i]._add_series_element((coord.0-elemblock, coord.1-start_y), new_element, new_cmp, new_pidx)
                 } else {None}
             }
         };
@@ -644,24 +659,26 @@ impl Circuit {
     }
 
 
-    pub fn add_parallel_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<usize> {
-        self._add_parallel_element(coord, new_element, 0)
+    pub fn add_parallel_element(&mut self, coord: (u16, u16), new_element: Element) -> Option<(usize, usize)> {
+        self._add_parallel_element(coord, new_element, 0, 0)
     }
 
-    pub fn _add_parallel_element(&mut self, coord: (u16, u16), new_element: Element, prev_param: usize) -> Option<usize> {
-        let out: Option<usize> = match self {
+    pub fn _add_parallel_element(&mut self, coord: (u16, u16), new_element: Element, prev_component: usize, prev_param: usize) -> Option<(usize, usize)> {
+        let out = match self {
             Self::Element(e) => {
+                let new_cmp = prev_component + 1;
                 let new_param = prev_param+e.param_count();
                 *self = Self::Parallel(vec![Self::Element(*e), Self::Element(new_element)]);
-                new_param.into()
+                (new_cmp, new_param).into()
             },
 
             Self::Series(elems) => {
                 assert!(elems.len() > 1);
                 if let Some((i, start_x)) = series_index_by_block(elems, coord) {
                     {
+                        let new_cmp = prev_component+i;
                         let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                        elems[i]._add_parallel_element((coord.0 - start_x, coord.1), new_element, new_pidx)
+                        elems[i]._add_parallel_element((coord.0 - start_x, coord.1), new_element, new_cmp, new_pidx)
                     }
                 } else {None}
             }
@@ -671,8 +688,9 @@ impl Circuit {
                 let ib = parallel_index_by_block(elems, coord);
 
                 if let ParallelBlockPicked::Child(i, elemblock, start_y) = ib {
+                    let new_cmp = prev_component+i;
                     let new_pidx = prev_param + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
-                    elems[i]._add_parallel_element((coord.0-elemblock, coord.1-start_y), new_element, new_pidx)
+                    elems[i]._add_parallel_element((coord.0-elemblock, coord.1-start_y), new_element, new_cmp, new_pidx)
                 } else {None}
             }
         };

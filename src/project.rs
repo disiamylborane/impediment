@@ -82,45 +82,114 @@ impl GroupParameterType {
 
 #[derive(Debug, Clone)]
 pub enum ParameterDescriptor {
-    Individual(String),
-    Group(String, GroupParameterType),
-}
-impl ParameterDescriptor{
-    pub fn name(&self) -> &str {
-        match self {
-            ParameterDescriptor::Individual(nm) | ParameterDescriptor::Group(nm, _) => nm,
-        }
-    }
+    Individual,
+    Group(GroupParameterType),
 }
 
 
 #[derive(Debug, Clone)]
 pub struct Model {
     pub circuit: Circuit,
+    pub component_names: Vec<String>,
     pub params: Vec<ParameterDescriptor>,
     pub name: String,
     pub lock: bool,
 }
 
+pub struct ModelIndIter<'it> {
+    model: &'it mut Model,
+    param_letters: Vec<(&'static str, usize)>,
+
+    param: usize,
+}
+
+impl<'it> ModelIndIter<'it> {
+    pub fn next(& mut self, ui: &egui::Ui) -> Option<(& mut String, usize, egui::Label)> {
+        let &(param_letter, component_idx) = self.param_letters.get(self.param)?;
+
+        let out = if matches!(self.model.params[self.param], ParameterDescriptor::Individual) {
+            let string = &mut self.model.component_names[component_idx];
+
+            let mut job = egui::text::LayoutJob::default();
+            job.append(param_letter, 0.0, egui::text::TextFormat{..Default::default()});
+            job.append(string, 0.0, small_style(ui));
+            let label = egui::Label::new(job);
+            (string, self.param, label)
+        } else {
+            self.param += 1;
+            return self.next(ui);
+        };
+
+        self.param += 1;
+
+        Some(out)
+    }
+}
+
+pub struct ModelGroupIter<'it> {
+    model: &'it mut Model,
+    param_letters: Vec<(&'static str, usize)>,
+
+    param: usize,
+    var: usize,
+}
+
+impl<'it> ModelGroupIter<'it> {
+    pub fn next(&mut self, ui: &egui::Ui, consts: &[String]) -> Option<(&mut String, egui::Label)> {
+        let &(param_letter, component_idx) = self.param_letters.get(self.param)?;
+
+        match self.model.params[self.param] {
+            ParameterDescriptor::Individual => {
+                self.param += 1;
+                self.var = 0;
+                return self.next(ui, consts);
+            }
+            ParameterDescriptor::Group(pd) => {
+                let string = &mut self.model.component_names[component_idx];
+
+                let mut job = egui::text::LayoutJob::default();
+                job.append(param_letter, 0.0, egui::text::TextFormat{..Default::default()});
+                job.append(string, 0.0, small_style(ui));
+
+                let suffix = match pd {
+                    GroupParameterType::Value => String::new(),
+                    GroupParameterType::Linear(cidx) => {
+                        if self.var == 0 {format!(": {}*", consts[cidx])}
+                        else {": +".to_string()}
+                    }
+                };
+                job.append(&suffix, 0.0, egui::text::TextFormat{..Default::default()});
+
+                self.var += 1;
+                if self.var == pd.varcount() {
+                    self.var = 0;
+                    self.param += 1;
+                }
+                Some((string, egui::Label::new(job)))
+            }
+        }
+    }
+}
+
+
+fn small_style(ui: &egui::Ui) -> egui::text::TextFormat {
+    ui.style().as_ref().text_styles.get(&egui::TextStyle::Small)
+        .map_or_else(
+            || egui::text::TextFormat{italics: true, ..Default::default()}, 
+            |font_id| egui::text::TextFormat{font_id: font_id.clone(), ..Default::default()})
+}
+
 
 impl Model {
-    fn small_style(ui: &egui::Ui) -> egui::text::TextFormat {
-        ui.style().as_ref().text_styles.get(&egui::TextStyle::Small)
-            .map_or_else(
-                || egui::text::TextFormat{italics: true, ..Default::default()}, 
-                |font_id| egui::text::TextFormat{font_id: font_id.clone(), ..Default::default()})
-    }
-
-
     pub fn var_ranges(&self, param_range: Range<usize>) -> (Range<usize>, Range<usize>) {
         let mut ind_var = 0;
         let mut grp_var = 0;
 
         for param in 0..(param_range.start) {
             match self.params[param] {
-                ParameterDescriptor::Individual(_) => ind_var += 1,
-                ParameterDescriptor::Group(_, GroupParameterType::Value) => grp_var += 1,
-                ParameterDescriptor::Group(_, GroupParameterType::Linear(_)) => grp_var += 2,
+                ParameterDescriptor::Individual => ind_var += 1,
+                ParameterDescriptor::Group(GroupParameterType::Value) => grp_var += 1,
+                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => grp_var += 2,
             }
         }
 
@@ -129,59 +198,36 @@ impl Model {
 
         for param in param_range {
             match self.params[param] {
-                ParameterDescriptor::Individual(_) => ind_end += 1,
-                ParameterDescriptor::Group(_, GroupParameterType::Value) => grp_end += 1,
-                ParameterDescriptor::Group(_, GroupParameterType::Linear(_)) => grp_end += 2,
+                ParameterDescriptor::Individual => ind_end += 1,
+                ParameterDescriptor::Group(GroupParameterType::Value) => grp_end += 1,
+                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => grp_end += 2,
             }
         }
 
         (ind_var..ind_end, grp_var..grp_end)
     }
     
-
-    pub fn get_individual_vars(&self, ui: &egui::Ui) -> Vec<egui::Label> {
-        let mut out = vec![];
-        for (pt, &letter) in self.params.iter().zip(self.circuit.param_letters().iter()) {
-            if let ParameterDescriptor::Individual(pts) = pt {
-                let mut job = egui::text::LayoutJob::default();
-                job.append(letter, 0.0, egui::text::TextFormat{..Default::default()});
-                job.append(pts, 0.0, Self::small_style(ui));
-                out.push(egui::Label::new(job));
-            }
-        }
-        out
+    pub fn individual_vars_count(&self) -> usize {
+        self.params.iter().filter(|x| matches!(x, ParameterDescriptor::Individual)).count()
+    }
+    pub fn group_vars_count(&self) -> usize {
+        self.params
+            .iter()
+            .map(|x| match x{
+                ParameterDescriptor::Individual => 0,
+                ParameterDescriptor::Group(g) => g.varcount()
+            })
+            .sum()
     }
 
-    pub fn get_group_vars(&self, ui: &egui::Ui, consts: &[String]) -> Vec<egui::Label> {
-        let mut out = vec![];
-        for (pt, &letter) in self.params.iter().zip(self.circuit.param_letters().iter()) {
-            if let ParameterDescriptor::Group(pts, gtype) = pt {
+    pub fn get_individual_vars(&mut self) -> ModelIndIter {
+        let param_letters = self.circuit.param_letters();
+        ModelIndIter{ model: self, param_letters, param: 0 }
+    }
 
-                match gtype {
-                    GroupParameterType::Value => {
-                        let mut job = egui::text::LayoutJob::default();
-                        job.append(letter, 0.0, egui::text::TextFormat{..Default::default()});
-                        job.append(pts, 0.0, Self::small_style(ui));
-                        out.push(egui::Label::new(job));
-                    }
-
-                    &GroupParameterType::Linear(cst) => {
-                        let mut job = egui::text::LayoutJob::default();
-                        job.append(letter, 0.0, egui::text::TextFormat{..Default::default()});
-                        job.append(pts, 0.0, Self::small_style(ui));
-                        job.append(": +", 0.0, egui::text::TextFormat{..Default::default()});
-                        out.push(egui::Label::new(job));
-
-                        let mut job = egui::text::LayoutJob::default();
-                        job.append(letter, 0.0, egui::text::TextFormat{..Default::default()});
-                        job.append(pts, 0.0, Self::small_style(ui));
-                        job.append(&format!(": {}*", consts[cst]), 0.0, egui::text::TextFormat{..Default::default()});
-                        out.push(egui::Label::new(job));
-                    }
-                }
-            }
-        }
-        out
+    pub fn get_group_vars(&mut self) -> ModelGroupIter {
+        let param_letters = self.circuit.param_letters();
+        ModelGroupIter { model: self, param_letters, param: 0, var: 0 }
     }
 
     pub fn build_params(&self, inds: &[ModelVariable], grps: &[ModelVariable]) -> Vec<f64> {
@@ -192,15 +238,15 @@ impl Model {
 
         for param in &self.params {
             match param {
-                ParameterDescriptor::Individual(_) => {
+                ParameterDescriptor::Individual => {
                     out.push(inds[ind_var].val);
                     ind_var += 1;
                 }
-                ParameterDescriptor::Group(_, GroupParameterType::Value) => {
+                ParameterDescriptor::Group(GroupParameterType::Value) => {
                     out.push(grps[grp_var].val);
                     grp_var += 1;
                 }
-                ParameterDescriptor::Group(_, GroupParameterType::Linear(_)) => {
+                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => {
                     todo!()
                 }
             }
@@ -221,7 +267,6 @@ pub struct ProjectData {
 
 #[derive(Debug)]
 pub enum ConsistencyError {
-    Unknown,
     ModelCnt{spectrum_group: usize},
     ConstLen{spectrum_group: usize, spectrum: usize},
     IndividualLen{spectrum_group: usize, spectrum: usize},
@@ -259,8 +304,8 @@ impl ProjectData {
         for (imodel, model) in self.models.iter().enumerate() {
             constrain!(model.circuit.param_count(), model.params.len() => ParamCount{model: imodel});
 
-            let ind_len: usize = model.params.iter().map(|x| match x {Individual(_) => 1, Group(_, _) => 0}).sum();
-            let gvar_count: usize = model.params.iter().map(|x| match x {Individual(_) => 0, Group(_, tp) => tp.varcount()}).sum();
+            let ind_len: usize = model.params.iter().map(|x| match x {Individual => 1, Group(_) => 0}).sum();
+            let gvar_count: usize = model.params.iter().map(|x| match x {Individual => 0, Group(tp) => tp.varcount()}).sum();
 
             for (i_sgroup, sgroup) in self.dataset.iter().enumerate() {
                 let gvars = &sgroup.group_vars[imodel];
@@ -430,13 +475,15 @@ impl ProjectData {
         let models = vec![
             Model{ 
                 circuit: Circuit::Element(Element::Resistor), 
-                params: vec![ParameterDescriptor::Individual("ct".to_string())],
+                component_names: vec!["ct".to_string()],
+                params: vec![ParameterDescriptor::Individual],
                 name: "Model R".to_string(),
                 lock: false,
             },
             Model{ 
                 circuit: Circuit::Element(Element::Capacitor), 
-                params: vec![ParameterDescriptor::Group("dl".to_string(), GroupParameterType::Value)],
+                component_names: vec!["dl".to_string()],
+                params: vec![ParameterDescriptor::Group(GroupParameterType::Value)],
                 name: "Model C".to_string(),
                 lock: false,
             },
@@ -511,7 +558,8 @@ impl ProjectData {
         let idx = self.models.len();
         let mdl = Model{
             circuit: Circuit::Element(Element::Resistor),
-            params: vec![ParameterDescriptor::Individual("0".to_string())],
+            component_names: vec!["0".to_string()],
+            params: vec![ParameterDescriptor::Individual],
             name: "Circuit".to_string(),
             lock: false,
         };
