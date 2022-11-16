@@ -107,6 +107,8 @@ impl<'it> ModelIndIter<'it> {
     pub fn next(& mut self, ui: &egui::Ui) -> Option<(& mut String, usize, egui::Label)> {
         let &(param_letter, component_idx) = self.param_letters.get(self.param)?;
 
+        //println!("Cnames {:?}", self.param_letters);
+
         let out = if matches!(self.model.params[self.param], ParameterDescriptor::Individual) {
             let string = &mut self.model.component_names[component_idx];
 
@@ -254,6 +256,57 @@ impl Model {
 
         out
     }
+
+    pub fn build_params_f64(&self, inds: &[f64], grps: &[ModelVariable]) -> Vec<f64> {
+        let mut out = vec![];
+
+        let mut ind_var = 0;
+        let mut grp_var = 0;
+
+        for param in &self.params {
+            match param {
+                ParameterDescriptor::Individual => {
+                    out.push(inds[ind_var]);
+                    ind_var += 1;
+                }
+                ParameterDescriptor::Group(GroupParameterType::Value) => {
+                    out.push(grps[grp_var].val);
+                    grp_var += 1;
+                }
+                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => {
+                    todo!()
+                }
+            }
+        }
+
+        out
+    }
+
+    pub fn build_params_f64f64(&self, inds: &[f64], grps: &[f64]) -> Vec<f64> {
+        let mut out = vec![];
+
+        let mut ind_var = 0;
+        let mut grp_var = 0;
+
+        for param in &self.params {
+            match param {
+                ParameterDescriptor::Individual => {
+                    out.push(inds[ind_var]);
+                    ind_var += 1;
+                }
+                ParameterDescriptor::Group(GroupParameterType::Value) => {
+                    out.push(grps[grp_var]);
+                    grp_var += 1;
+                }
+                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => {
+                    todo!()
+                }
+            }
+        }
+
+        out
+    }
+
 }
 
 
@@ -267,6 +320,8 @@ pub struct ProjectData {
 
 #[derive(Debug)]
 pub enum ConsistencyError {
+    UnknownError,
+
     ModelCnt{spectrum_group: usize},
     ConstLen{spectrum_group: usize, spectrum: usize},
     IndividualLen{spectrum_group: usize, spectrum: usize},

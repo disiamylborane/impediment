@@ -291,7 +291,7 @@ impl Circuit {
                 let mut ni = start_index;
                 for el in elems {
                     let mut children = el._param_letters(ni);
-                    ni += children.len();
+                    ni += el.element_count();
                     out.append(&mut children);
                 }
                 out

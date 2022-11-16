@@ -86,6 +86,7 @@ pub struct ImpedimentApp {
     pub import_data: Option<ImportModule>,
     pub edit_buffer: String,
     pub action_buffer: UndoBuffer,
+    pub status_string: String,
 }
 
 
@@ -576,68 +577,71 @@ fn render_data_editor(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp
     let focus = ctx.memory().focus();
 
     if let Some((k,s)) = iapp.editor_variables.current_spectrum {
-        let spectrum = &mut iapp.prjdata.dataset[k].spectra[s];
-        let mut delete_it = None;
 
-        for (i_point, point) in spectrum.points.iter_mut().enumerate() {
+        egui::ScrollArea::both().show(ui, |ui|->Result<(), Action> {
+            let spectrum = &mut iapp.prjdata.dataset[k].spectra[s];
+            let mut delete_it = None;
+    
+            for (i_point, point) in spectrum.points.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(point.enabled, "·").context_menu(|ui|{
+                        if ui.button("Delete").clicked() {
+                            delete_it = Some(i_point);
+                            ui.close_menu();
+                        }    
+                    }).clicked() {
+                        point.enabled = !point.enabled;
+                    }
+    
+                    if delete_it.is_some() {
+                        return Ok(());
+                    }
+    
+                    let desired_width = (ui.available_width() - 30.0)/3.0;  // Magic numbers
+    
+                    let freq_id = egui::Id::new(i_point << 8 | 0b_1010_0000);
+                    if let Err(old_val) = value_editor(ui, freq_id, focus==Some(freq_id), &mut iapp.edit_buffer, desired_width, &mut point.freq) {
+                        return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Freq, value: old_val });
+                    }
+    
+                    let re_id = egui::Id::new(i_point << 8 | 0b_1010_0001);
+                    if let Err(old_val) = value_editor(ui, re_id, focus==Some(re_id), &mut iapp.edit_buffer, desired_width, &mut point.imp.re) {
+                        return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Re, value: old_val });
+                    }
+    
+                    let im_id = egui::Id::new(i_point << 8 | 0b_1010_0010);
+                    if let Err(old_val) = value_editor(ui, im_id, focus==Some(im_id), &mut iapp.edit_buffer, desired_width, &mut point.imp.im) {
+                        return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Im, value: old_val });
+                    }
+    
+                    Ok(())
+                }).inner?;
+    
+                if let Some(di) = delete_it {
+                    let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
+                    iapp.prjdata.dataset[k].spectra[s].points.remove(di);
+                    return Err(d);
+                }
+            }
+    
             ui.horizontal(|ui| {
-                if ui.selectable_label(point.enabled, "·").context_menu(|ui|{
-                    if ui.button("Delete").clicked() {
-                        delete_it = Some(i_point);
-                        ui.close_menu();
-                    }    
-                }).clicked() {
-                    point.enabled = !point.enabled;
+                if ui.button("+").clicked() {
+                    let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
+                    let dp_default = DataPoint { freq: 1.0, imp: Cplx{re:0.0,im:0.0}, enabled: true };
+                    let pts = &mut iapp.prjdata.dataset[k].spectra[s].points;
+                    pts.push(pts.last().cloned().unwrap_or(dp_default));
+                    return Err(d);
                 }
-
-                if delete_it.is_some() {
-                    return Ok(());
+    
+                if ui.button("Sort").clicked() {
+                    let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
+                    let pts = &mut iapp.prjdata.dataset[k].spectra[s].points;
+                    pts.sort_unstable_by(|a,b| a.freq.partial_cmp(&b.freq).unwrap_or(std::cmp::Ordering::Equal) );
+                    return Err(d);
                 }
-
-                let desired_width = (ui.available_width() - 30.0)/3.0;  // Magic numbers
-
-                let freq_id = egui::Id::new(i_point << 8 | 0b_1010_0000);
-                if let Err(old_val) = value_editor(ui, freq_id, focus==Some(freq_id), &mut iapp.edit_buffer, desired_width, &mut point.freq) {
-                    return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Freq, value: old_val });
-                }
-
-                let re_id = egui::Id::new(i_point << 8 | 0b_1010_0001);
-                if let Err(old_val) = value_editor(ui, re_id, focus==Some(re_id), &mut iapp.edit_buffer, desired_width, &mut point.imp.re) {
-                    return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Re, value: old_val });
-                }
-
-                let im_id = egui::Id::new(i_point << 8 | 0b_1010_0010);
-                if let Err(old_val) = value_editor(ui, im_id, focus==Some(im_id), &mut iapp.edit_buffer, desired_width, &mut point.imp.im) {
-                    return Err(Action::EditDataPoint { idx: (k,s,i_point), part: project::DataPointVal::Im, value: old_val });
-                }
-
+    
                 Ok(())
-            }).inner?;
-
-            if let Some(di) = delete_it {
-                let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
-                iapp.prjdata.dataset[k].spectra[s].points.remove(di);
-                return Err(d);
-            }
-        }
-
-        ui.horizontal(|ui| {
-            if ui.button("+").clicked() {
-                let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
-                let dp_default = DataPoint { freq: 1.0, imp: Cplx{re:0.0,im:0.0}, enabled: true };
-                let pts = &mut iapp.prjdata.dataset[k].spectra[s].points;
-                pts.push(pts.last().cloned().unwrap_or(dp_default));
-                return Err(d);
-            }
-
-            if ui.button("Sort").clicked() {
-                let d = Action::Unknown(Box::new(iapp.prjdata.clone()));
-                let pts = &mut iapp.prjdata.dataset[k].spectra[s].points;
-                pts.sort_unstable_by(|a,b| a.freq.partial_cmp(&b.freq).unwrap_or(std::cmp::Ordering::Equal) );
-                return Err(d);
-            }
-
-            Ok(())
+            }).inner
         }).inner?;
     }
     Ok(())
@@ -769,24 +773,18 @@ fn render_ind_params(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)
                 }
 
                 let val_id = egui::Id::new(i_ind << 8 | 0b_0011_0011);
-                if let Err(old_val) = value_editor(ui, val_id, focus==Some(val_id), &mut iapp.edit_buffer, wi/2.0, &mut val.val) {
+                if let Err(old_val) = bounded_value_editor(ui, val_id, focus==Some(val_id), &mut iapp.edit_buffer, wi/2.0, &mut val.val, val.bounds) {
                     return Err(Action::EditIndividualVar { mdl, spec: (grp, spc), var: i_ind, part: project::DataVarPart::Val, value: old_val });
                 }
 
-                if ui
-                    .small_button("<")
-                    .on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");})
-                    .clicked() 
-                {
+                let sbdown = ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");});
+                let sbup = ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");});
+                if sbdown.clicked() {
                     if ctx.input().modifiers.shift  { val.val /= 1.01 }
                     else if ctx.input().modifiers.command { val.val /= 2.0 }
                     else { val.val /= 1.1 }
                 }
-                if ui
-                    .small_button(">")
-                    .on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");})
-                    .clicked() 
-                {
+                if sbup.clicked() {
                     if ctx.input().modifiers.shift  { val.val *= 1.01 }
                     else if ctx.input().modifiers.command { val.val *= 2.0 }
                     else { val.val *= 1.1 }
@@ -848,24 +846,18 @@ fn render_grp_vars(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->
                 }
 
                 let val_id = egui::Id::new(i_grvar << 8 | 0b_1001_0011);
-                if let Err(old_val) = value_editor(ui, val_id, focus==Some(val_id), &mut iapp.edit_buffer, wi/2.0, &mut val.val) {
+                if let Err(old_val) = bounded_value_editor(ui, val_id, focus==Some(val_id), &mut iapp.edit_buffer, wi/2.0, &mut val.val, val.bounds) {
                     return Err(Action::EditGroupVar { mdl, spec: grp, var: i_grvar, part: project::DataVarPart::Val, value: old_val });
                 }
 
-                if ui
-                    .small_button("<")
-                    .on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");})
-                    .clicked() 
-                {
+                let sbdown = ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");});
+                let sbup = ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");});
+                if sbdown.clicked() {
                     if ctx.input().modifiers.shift  { val.val /= 1.01 }
                     else if ctx.input().modifiers.command { val.val /= 2.0 }
                     else { val.val /= 1.1 }
                 }
-                if ui
-                    .small_button(">")
-                    .on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");})
-                    .clicked() 
-                {
+                if sbup.clicked() {
                     if ctx.input().modifiers.shift  { val.val *= 1.01 }
                     else if ctx.input().modifiers.command { val.val *= 2.0 }
                     else { val.val *= 1.1 }
@@ -880,9 +872,65 @@ fn render_grp_vars(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->
 }
 
 
+fn bounded_value_editor(ui: &mut egui::Ui, id: egui::Id, focused_now: bool, str_buffer: &mut String, desired_width: f32, val: &mut f64, bounds: (f64, f64)) -> Result<(), f64> {
+    if focused_now {
+        let text_color = if str_buffer.parse::<f64>().is_ok() {
+            if (bounds.0..=bounds.1).contains(val) {
+                let lerp = (val.ln()-bounds.0.ln()) / (bounds.1.ln()-bounds.0.ln());
+                if !(0.05..=0.95).contains(&lerp) {
+                    Some(Color32::from_rgb(0x80, 0x99, 0xFF))
+                }
+                else {None}
+            } 
+            else {
+                Some(egui::Color32::BLUE)
+            }
+        }
+        else {
+            Some(egui::Color32::RED)
+        };
+
+        let resp = egui::TextEdit::singleline(str_buffer).desired_width(desired_width).text_color_opt(text_color).id(id).ui(ui);
+        if !resp.lost_focus() && resp.changed() {
+            if let Ok(x) = str_buffer.parse() {
+                let old_val = *val;
+                *val = x;
+                return Err(old_val);
+            }
+        }
+    } else {
+        let text_color = if (bounds.0..=bounds.1).contains(val) {
+            let lerp = (val.ln()-bounds.0.ln()) / (bounds.1.ln()-bounds.0.ln());
+            if !(0.05..=0.95).contains(&lerp) {
+                Some(Color32::from_rgb(0x80, 0x99, 0xFF))
+            }
+            else {None}
+        }
+        else {
+            Some(egui::Color32::BLUE)
+        };
+
+        let mut strval = val.to_string();
+        let resp = egui::TextEdit::singleline(&mut strval).desired_width(desired_width).text_color_opt(text_color).id(id).ui(ui);
+
+        if resp.gained_focus() {
+            *str_buffer = strval;
+        }
+    }
+
+    Ok(())
+}
+
+
 fn value_editor(ui: &mut egui::Ui, id: egui::Id, focused_now: bool, str_buffer: &mut String, desired_width: f32, val: &mut f64) -> Result<(), f64> {
     if focused_now {
-        let text_color = if str_buffer.parse::<f64>().is_ok() {None} else {Some(egui::Color32::RED)};
+        let text_color = if str_buffer.parse::<f64>().is_ok() {
+            None
+        }
+        else {
+            Some(egui::Color32::RED)
+        };
+
         let resp = egui::TextEdit::singleline(str_buffer).desired_width(desired_width).text_color_opt(text_color).id(id).ui(ui);
         if !resp.lost_focus() && resp.changed() {
             if let Ok(x) = str_buffer.parse() {
@@ -1000,8 +1048,6 @@ fn display_import_window(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) 
 
                     ui.horizontal(|ui| {
                         if ui.button("Load").clicked() {
-                            //...
-
                             let d_old = iapp.prjdata.clone();
                             let constants = vec![0.0; iapp.prjdata.constants.len()];
                             let ind_params: Vec<Vec<ModelVariable>> = iapp.prjdata.models
@@ -1038,10 +1084,170 @@ fn display_import_window(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) 
 
 
 
-fn fit_individuals(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) -> Result<(), Action> {
+fn fit_all(iapp: &mut ImpedimentApp) -> Result<(), Action> {
     let (Some(imodel), Some((icg, icc))) = (iapp.editor_variables.current_circ, iapp.editor_variables.current_spectrum) else {return Ok(())};
 
+    let model = &iapp.prjdata.models[imodel];
+    let sgroup = &mut iapp.prjdata.dataset[icg];
+
+    let grplen = sgroup.group_vars[imodel].len();
+    let indlen = sgroup.spectra[icc].ind_params[imodel].len();
+
+    let mut params = vec![];
+    params.extend(sgroup.group_vars[imodel].iter().cloned());
+
+    let spectra = &sgroup.spectra;
+
+    for sp in spectra {
+        params.extend(sp.ind_params[imodel].iter().cloned());
+    }
+    assert!(params.len() == grplen+indlen*spectra.len());
+
+    let mut vals = params.iter().map(|x| x.val).collect::<Vec<_>>();
+    let mins = params.iter().map(|x| if x.enabled {x.bounds.0} else {x.val}).collect::<Vec<_>>();
+    let maxs = params.iter().map(|x| if x.enabled {x.bounds.1} else {x.val}).collect::<Vec<_>>();
+
+    assert!(vals.len() == grplen+indlen*spectra.len());
+    assert!(mins.len() == grplen+indlen*spectra.len());
+    assert!(maxs.len() == grplen+indlen*spectra.len());
+
+    let sgroup_loss = |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| -> f64 {
+        let (grps, mut allinds) = params.split_at(grplen);
+
+        let mut loss = 0.0;
+        if let Some(ref mut gout) = gradient_out {
+            for g in gout.iter_mut() {*g = 0.0;}
+        }
+
+        for spec in spectra {
+            let (iparams, _nallinds) = allinds.split_at(indlen);
+            allinds = _nallinds;
+            let all_params = model.build_params_f64f64(iparams, grps);
+            
+            for dp in spec.points.iter().filter(|dp| dp.enabled) {
+                let predicted_imp = model.circuit.impedance(2.0*PI*dp.freq, &all_params);
+                let real_imp = dp.imp;
+                let diff = predicted_imp - real_imp;
+                loss += diff.norm_sqr() / real_imp.norm_sqr();
+
+                if let Some(ref mut _gout) = gradient_out {
+                    todo!()
+                }
+            }
+        }
+        loss
+    };
+
+    let mut opt = nlopt::Nlopt::new(
+        nlopt::Algorithm::Bobyqa,
+        params.len(),
+        sgroup_loss,
+        nlopt::Target::Minimize,
+        ()
+    );
+
+    opt.set_maxeval(u32::MAX).unwrap();
+    opt.set_maxtime(10.0).unwrap();
+
+    opt.set_lower_bounds(&mins).unwrap();
+    opt.set_upper_bounds(&maxs).unwrap();
     
+    opt.set_xtol_rel(1e-10).unwrap();
+
+    let optresult = opt.optimize(&mut vals);
+    iapp.status_string = format!("{optresult:?}, loss = {}", sgroup_loss(&vals, None, &mut ()));
+
+    std::mem::drop(opt);
+
+    assert!(vals.len() == grplen+indlen*spectra.len());
+
+    let vals = (&vals) as &[_];
+
+    let (newgrps, mut newinds) = vals.split_at(grplen);
+    for (ng, pos) in newgrps.iter().zip(&mut sgroup.group_vars[imodel]) {
+        pos.val = *ng;
+    }
+
+    for sp in &mut sgroup.spectra {
+        let (newindq, next_newinds) = newinds.split_at(indlen);
+        newinds = next_newinds;
+        for (ni, pos) in newindq.iter().zip(&mut sp.ind_params[imodel]) {
+            pos.val = *ni;
+        }
+    }
+
+    Ok(())
+}
+
+
+
+fn fit_individuals(iapp: &mut ImpedimentApp) -> Result<(), Action> {
+    let (Some(imodel), Some((icg, icc))) = (iapp.editor_variables.current_circ, iapp.editor_variables.current_spectrum) else {return Ok(())};
+
+    let model = &iapp.prjdata.models[imodel];
+    let dset = &mut iapp.prjdata.dataset[icg];
+
+    let spectrum = &mut dset.spectra[icc];
+
+    let inds = &mut spectrum.ind_params[imodel];
+    let points = &spectrum.points;
+    let grp_vars = &dset.group_vars[imodel];
+
+    let ind_loss = |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| -> f64 {
+        let all_params = model.build_params_f64(params, grp_vars);
+        let mut loss = 0.0;
+
+        if let Some(ref mut gout) = gradient_out {
+            for g in gout.iter_mut() {*g = 0.0;}
+        }
+
+        for dp in points.iter().filter(|dp| dp.enabled) {
+            let predicted_imp = model.circuit.impedance(2.0*PI*dp.freq, &all_params);
+            let real_imp = dp.imp;
+            let diff = predicted_imp - real_imp;
+            loss += diff.norm_sqr() / real_imp.norm_sqr();
+
+            if let Some(ref mut gout) = gradient_out {
+                let mut iind = 0;
+                for (ipd, pd) in model.params.iter().enumerate() {
+                    match pd {
+                        ParameterDescriptor::Individual => {
+                            let dmdx = model.circuit._d_impedance(std::f64::consts::TAU*dp.freq, &all_params, ipd);
+                            let ml = (real_imp - predicted_imp)*dmdx.conj().re * 2.0;
+                            gout[iind] += -1.0 / real_imp.norm_sqr() * ml.re;
+                            iind += 1;
+                        }
+                        ParameterDescriptor::Group(_) => {}
+                    }
+                }
+            };
+        }
+        loss
+    };
+
+    let mut opt = nlopt::Nlopt::new(
+        nlopt::Algorithm::Bobyqa,
+        inds.len(),
+        ind_loss,
+        nlopt::Target::Minimize,
+        ()
+    );
+    opt.set_maxeval(u32::MAX).unwrap();
+    opt.set_maxtime(10.0).unwrap();
+
+    opt.set_lower_bounds(&inds.iter_mut().map(|x| x.bounds.0).collect::<Vec<f64>>()).unwrap();
+    opt.set_upper_bounds(&inds.iter_mut().map(|x| x.bounds.1).collect::<Vec<f64>>()).unwrap();
+    
+    opt.set_xtol_rel(1e-10).unwrap();
+
+    let mut params = inds.iter_mut().map(|x| x.val).collect::<Vec<_>>();
+
+    let optresult = opt.optimize(&mut params);
+    iapp.status_string = format!("{optresult:?}, loss = {}", ind_loss(&params, None, &mut ()));
+
+    for (is, p) in inds.iter_mut().zip(params) {
+        is.val = p;
+    }
 
     Ok(())
 }
@@ -1092,7 +1298,7 @@ impl eframe::App for ImpedimentApp {
                     ui.label("Individual parameters");
 
                     if ui.button("Fit").clicked() {
-
+                        fit_individuals(self)?;
                     }
                     if ui.button("Fit log").clicked() {
 
@@ -1109,21 +1315,22 @@ impl eframe::App for ImpedimentApp {
                     ui.label("Group parameters");
 
                     if ui.button("Fit").clicked() {
-
+                        fit_all(self)?;
                     }
                     if ui.button("Fit log").clicked() {
-
-                    }
-                    if ui.button("Fit all").clicked() {
-
-                    }
-                    if ui.button("Fit all log").clicked() {
 
                     }
 
                     Ok(())
                 }).inner?;
-                render_grp_vars(ctx, ui, self)
+                render_grp_vars(ctx, ui, self)?;
+
+                if !self.status_string.is_empty() {
+                    ui.separator();
+                    ui.label(&self.status_string);
+                }
+
+                Ok(())
             }).inner?;
 
             Ok(())
