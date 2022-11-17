@@ -1,4 +1,4 @@
-use std::{f64::consts::PI, fmt::Display};
+use std::{f64::consts::TAU, fmt::Display};
 
 use circuit::Element;
 use eframe::{egui::{self, Ui, Widget}, epaint::Color32};
@@ -277,16 +277,18 @@ fn render_circuit_editor(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Acti
                 }
             }
         }
-
-        iapp.editor_variables.blocksize += ui.input().scroll_delta.y/50.0;
-
-        if let Some(cc) = iapp.editor_variables.current_circ {
-            if ui.small_button("Unlock").clicked() {
-                iapp.prjdata.models[cc].lock = false;
-            }
-        } else {
-            ui.add_enabled(false, egui::Button::new("Unlock").small());
+ 
+        if response.hovered() {
+            iapp.editor_variables.blocksize += ui.input().scroll_delta.y/50.0;
         }
+    }
+
+    if let Some(cc) = iapp.editor_variables.current_circ {
+        if ui.small_button("Unlock").clicked() {
+            iapp.prjdata.models[cc].lock = false;
+        }
+    } else {
+        ui.add_enabled(false, egui::Button::new("Unlock").small());
     }
 
     Ok(())
@@ -294,29 +296,32 @@ fn render_circuit_editor(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Acti
 
 
 fn render_circuit_box(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
-    ui.horizontal(|ui| {
-        if hinted_btn(ui, "+", "Add a new circuit") {
-            let new_circ = iapp.prjdata.add_new_circuit_action();
-            return Err(new_circ.act(&mut iapp.prjdata))
-        }
-        hinted_btn(ui, "D", "Duplicate circuit");
-        if hinted_btn(ui, "-", "Remove current circuit") {
-            if let Some(idx) = iapp.editor_variables.current_circ {
-                let action = Action::RemoveCircuit { idx };
-                iapp.editor_variables.current_circ = None;
-                return Err(action.act(&mut iapp.prjdata))
-            }
-        }
-        Ok(())
-    }).inner?;
-
     for (i, model) in iapp.prjdata.models.iter_mut().enumerate() {
         let old_name = model.name.clone();
 
         let tedit = egui::TextEdit::singleline(&mut model.name);
         let tedit = if iapp.editor_variables.current_circ==Some(i) {tedit.text_color(Color32::RED)} else {tedit};
 
-        let tres = ui.add(tedit);
+        let mut duplicate = false;
+        let mut delete = false;
+        let tres = ui.add(tedit).context_menu(|ui| {
+            if ui.button("Duplicate").clicked() {
+                duplicate = true;
+                ui.close_menu();
+            }
+            if ui.button("Delete").clicked() {
+                delete = true;
+                ui.close_menu();
+            }
+        });
+        if duplicate {
+        }
+        if delete {
+            let action = Action::RemoveCircuit { idx: i };
+            iapp.editor_variables.current_circ = None;
+            return Err(action.act(&mut iapp.prjdata))
+        }
+
 
         if tres.clicked() {
             iapp.editor_variables.current_circ = Some(i);
@@ -325,6 +330,11 @@ fn render_circuit_box(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action>
         if tres.changed() {
             return Err(Action::EditCircuitName { idx: i, name: old_name });
         }
+    }
+
+    if hinted_btn(ui, "+", "Add a new circuit") {
+        let new_circ = iapp.prjdata.add_new_circuit_action();
+        return Err(new_circ.act(&mut iapp.prjdata))
     }
 
     Ok(())
@@ -499,7 +509,6 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
     
     let mut pltshow = vec![];
     let mut pltlines = vec![];
-    let freqrange = 0.01..10000.0;
     let extractor = match iapp.editor_variables.plot_type {
         PlotType::Nyquist => |datapoint: DataPoint| egui::plot::Value::new(datapoint.imp.re, -datapoint.imp.im),
         PlotType::BodePhase => |d: DataPoint| egui::plot::Value::new(d.freq.log10(), -d.imp.arg().to_degrees()),
@@ -530,19 +539,24 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
 
         if let Some(cc) = iapp.editor_variables.current_circ {
             let mdl = &iapp.prjdata.models[cc];
+
+            let freqrange = if spectrum.points.len() < 2 {0.01..10000.0} else {
+                spectrum.points.iter().fold(f64::NEG_INFINITY, |a, b| a.max(b.freq))..spectrum.points.iter().fold(f64::INFINITY, |a, b| a.min(b.freq))
+            };
             let freqs = geomspace(freqrange.start, freqrange.end, 500);
 
             let grps = &iapp.prjdata.dataset[k].group_vars[cc];
             let inds = &iapp.prjdata.dataset[k].spectra[s].ind_params[cc];
+            let csts = &iapp.prjdata.dataset[k].spectra[s].constants;
 
-            let params = mdl.build_params(inds, grps);
+            let params = mdl.build_params(inds, grps, csts);
 
-            let points = freqs.map(|freq| DataPoint{freq, imp: mdl.circuit.impedance(2.*PI*freq, &params), enabled:true}).map(extractor);
+            let points = freqs.map(|freq| DataPoint{freq, imp: mdl.circuit.impedance(TAU*freq, &params), enabled:true}).map(extractor);
 
             let line = egui::plot::Line::new(egui::plot::Values::from_values_iter(points)).stroke((0.5, Color32::YELLOW));
             pltlines.push(line);
 
-            let predicted = spectrum.points.iter().map(|pt| DataPoint { freq: pt.freq, imp: mdl.circuit.impedance(2.*PI*pt.freq, &params), enabled: true }).map(extractor);
+            let predicted = spectrum.points.iter().map(|pt| DataPoint { freq: pt.freq, imp: mdl.circuit.impedance(TAU*pt.freq, &params), enabled: true }).map(extractor);
             
             let predicted_points = egui::plot::Points::new(
                 egui::plot::Values::from_values_iter(predicted)
@@ -673,7 +687,7 @@ fn render_consts(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->Re
 
                 let awi = ui.available_width();
 
-                let cst_id = egui::Id::new(i_cst << 8 | 0b_1111_0000);
+                let cst_id = egui::Id::new(i_cst << 8 | 0b_1111_1000);
                 if let Err(old_val) = value_editor(ui, cst_id, focus==Some(cst_id), &mut iapp.edit_buffer, awi-50.0, val) {
                     return Err(Action::EditConst { spec: (grp, spc), cst: i_cst, value: old_val });
                 }
@@ -820,18 +834,52 @@ fn render_grp_vars(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->
 
     if let (Some(mdl), Some((grp, _))) = (iapp.editor_variables.current_circ, iapp.editor_variables.current_spectrum) {
         let vals = &mut iapp.prjdata.dataset[grp].group_vars[mdl];
-        let mut names = iapp.prjdata.models[mdl].get_group_vars();
+        let model = &mut iapp.prjdata.models[mdl];
+        let mut names = model.get_group_vars();
         let mut ivals = vals.iter_mut().enumerate();
 
-        while let (Some(name), Some((i_grvar, val))) = (names.next(ui, &iapp.prjdata.constants), ivals.next()) {
+        let mut make_individual: Option<(usize, usize, project::ModelVariable)> = None;
+        let mut change_grouping: Option<(usize, usize, project::ModelVariable, project::GroupParameterType)> = None;
+
+        while let (Some((inner_name, label, param_idx, param_desc)), Some((i_grvar, val))) = (names.next(ui, &iapp.prjdata.constants), ivals.next()) {
             ui.horizontal(|ui| {
-                if ui.selectable_label(val.enabled, "·").clicked() {
+                //if ui.selectable_label(val.enabled, "·").clicked() {
+                //    val.enabled = !val.enabled;
+                //}
+
+                let selabel = ui.selectable_label(val.enabled, "·");
+                if selabel.clicked() {
                     val.enabled = !val.enabled;
                 }
 
+                selabel.context_menu(|ui|{
+                    match param_desc {
+                        ParameterDescriptor::Individual => {unreachable!()}
+                        ParameterDescriptor::Group(pdg) => {
+                            if ui.button("Make individual").clicked() {
+                                make_individual = Some((i_grvar, param_idx, val.clone()));
+                                ui.close_menu();
+                            }
+
+                            if !matches!(pdg, project::GroupParameterType::Value) && ui.button("Make Value").clicked() {
+                                change_grouping = Some((i_grvar, param_idx, val.clone(), project::GroupParameterType::Value));
+                                ui.close_menu();
+                            }
+                            if !matches!(pdg, project::GroupParameterType::Linear(_)) {
+                                for (icst, cst) in iapp.prjdata.constants.iter().enumerate() {
+                                    if ui.button(format!("Make LINEAR {cst}")).clicked() {
+                                        change_grouping = Some((i_grvar, param_idx, val.clone(), project::GroupParameterType::Linear(icst)));
+                                        ui.close_menu();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
                 let lab_id = egui::Id::new(i_grvar << 8 | 0b_1001_1111);
 
-                editable_label(focus, lab_id, ui, name.0, name.1, ctx);
+                editable_label(focus, lab_id, ui, inner_name, label, ctx);
 
                 let wi = ui.available_width() - 100.0;  // Magic numbers
 
@@ -865,6 +913,39 @@ fn render_grp_vars(ctx: &egui::Context, ui: &mut Ui, iapp: &mut ImpedimentApp)->
 
                 Ok(())
             }).inner?;
+        }
+
+        if let Some((_i_grvar, param_idx, mvar)) = make_individual {
+            let oldd = Box::new(iapp.prjdata.clone());
+            let ovar_range = iapp.prjdata.models[mdl].var_ranges(param_idx..(param_idx+1)).1;
+            iapp.prjdata.models[mdl].params[param_idx] = ParameterDescriptor::Individual;
+            let npar = iapp.prjdata.models[mdl].var_ranges(param_idx..(param_idx+1)).0.start;
+
+            for sg in &mut iapp.prjdata.dataset {
+                sg.group_vars[mdl].drain(ovar_range.clone());
+                for sp in &mut sg.spectra {
+                    sp.ind_params[mdl].insert(npar, mvar.clone());
+                }
+            }
+            return Err(Action::Unknown(oldd));
+        }
+
+        if let Some((_i_grvar, param_idx, mvar, gtype)) = change_grouping {
+            let oldd = Box::new(iapp.prjdata.clone());
+            let ovar_range = iapp.prjdata.models[mdl].var_ranges(param_idx..(param_idx+1)).1;
+            iapp.prjdata.models[mdl].params[param_idx] = ParameterDescriptor::Group(gtype);
+            let nvar_range = iapp.prjdata.models[mdl].var_ranges(param_idx..(param_idx+1)).1;
+
+            assert_eq!(ovar_range.start, nvar_range.start);
+
+            for sg in &mut iapp.prjdata.dataset {
+                sg.group_vars[mdl].drain(ovar_range.clone());
+                for nv in nvar_range.clone() {
+                    sg.group_vars[mdl].insert(nv, mvar.clone());
+                }
+            }
+
+            return Err(Action::Unknown(oldd));
         }
     }
 
@@ -1087,6 +1168,8 @@ fn display_import_window(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) 
 fn fit_all(iapp: &mut ImpedimentApp) -> Result<(), Action> {
     let (Some(imodel), Some((icg, icc))) = (iapp.editor_variables.current_circ, iapp.editor_variables.current_spectrum) else {return Ok(())};
 
+    let old_prjdata = iapp.prjdata.clone();
+
     let model = &iapp.prjdata.models[imodel];
     let sgroup = &mut iapp.prjdata.dataset[icg];
 
@@ -1120,12 +1203,14 @@ fn fit_all(iapp: &mut ImpedimentApp) -> Result<(), Action> {
         }
 
         for spec in spectra {
+            let csts = &spec.constants;
+
             let (iparams, _nallinds) = allinds.split_at(indlen);
             allinds = _nallinds;
-            let all_params = model.build_params_f64f64(iparams, grps);
+            let all_params = model.build_params_f64f64(iparams, grps, csts);
             
             for dp in spec.points.iter().filter(|dp| dp.enabled) {
-                let predicted_imp = model.circuit.impedance(2.0*PI*dp.freq, &all_params);
+                let predicted_imp = model.circuit.impedance(TAU*dp.freq, &all_params);
                 let real_imp = dp.imp;
                 let diff = predicted_imp - real_imp;
                 loss += diff.norm_sqr() / real_imp.norm_sqr();
@@ -1176,13 +1261,15 @@ fn fit_all(iapp: &mut ImpedimentApp) -> Result<(), Action> {
         }
     }
 
-    Ok(())
+    Err(Action::Unknown(Box::new(old_prjdata)))
 }
 
 
 
 fn fit_individuals(iapp: &mut ImpedimentApp) -> Result<(), Action> {
     let (Some(imodel), Some((icg, icc))) = (iapp.editor_variables.current_circ, iapp.editor_variables.current_spectrum) else {return Ok(())};
+    
+    let old_prjdata = iapp.prjdata.clone();
 
     let model = &iapp.prjdata.models[imodel];
     let dset = &mut iapp.prjdata.dataset[icg];
@@ -1193,8 +1280,10 @@ fn fit_individuals(iapp: &mut ImpedimentApp) -> Result<(), Action> {
     let points = &spectrum.points;
     let grp_vars = &dset.group_vars[imodel];
 
+    let csts = &mut spectrum.constants;
+
     let ind_loss = |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| -> f64 {
-        let all_params = model.build_params_f64(params, grp_vars);
+        let all_params = model.build_params_f64(params, grp_vars, csts);
         let mut loss = 0.0;
 
         if let Some(ref mut gout) = gradient_out {
@@ -1202,7 +1291,7 @@ fn fit_individuals(iapp: &mut ImpedimentApp) -> Result<(), Action> {
         }
 
         for dp in points.iter().filter(|dp| dp.enabled) {
-            let predicted_imp = model.circuit.impedance(2.0*PI*dp.freq, &all_params);
+            let predicted_imp = model.circuit.impedance(TAU*dp.freq, &all_params);
             let real_imp = dp.imp;
             let diff = predicted_imp - real_imp;
             loss += diff.norm_sqr() / real_imp.norm_sqr();
@@ -1212,7 +1301,7 @@ fn fit_individuals(iapp: &mut ImpedimentApp) -> Result<(), Action> {
                 for (ipd, pd) in model.params.iter().enumerate() {
                     match pd {
                         ParameterDescriptor::Individual => {
-                            let dmdx = model.circuit._d_impedance(std::f64::consts::TAU*dp.freq, &all_params, ipd);
+                            let dmdx = model.circuit._d_impedance(TAU*dp.freq, &all_params, ipd);
                             let ml = (real_imp - predicted_imp)*dmdx.conj().re * 2.0;
                             gout[iind] += -1.0 / real_imp.norm_sqr() * ml.re;
                             iind += 1;
@@ -1249,7 +1338,7 @@ fn fit_individuals(iapp: &mut ImpedimentApp) -> Result<(), Action> {
         is.val = p;
     }
 
-    Ok(())
+    Err(Action::Unknown(Box::new(old_prjdata)))
 }
 
 
@@ -1286,6 +1375,20 @@ impl eframe::App for ImpedimentApp {
 
 
             egui::CentralPanel::default().show(ctx, |ui| {
+                ui.vertical_centered_justified(|ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Undo").clicked() {
+                            self.action_buffer.undo(&mut self.prjdata, &mut self.editor_variables);
+                            return Ok(());
+                        }
+                        if ui.button("Redo").clicked() {
+                            self.action_buffer.redo(&mut self.prjdata, &mut self.editor_variables);
+                            return Ok(());
+                        }
+                        Ok(())
+                    }).inner
+                }).inner?;
+
                 ui.horizontal(|ui| {
                     ui.label("Dataset constants");
                     Ok(())

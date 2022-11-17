@@ -4,6 +4,7 @@ use std::ops::Range;
 use eframe::egui;
 use num::Complex;
 
+use crate::Ephemerals;
 use crate::circuit::Circuit;
 use crate::circuit::Element;
 
@@ -137,7 +138,7 @@ pub struct ModelGroupIter<'it> {
 }
 
 impl<'it> ModelGroupIter<'it> {
-    pub fn next(&mut self, ui: &egui::Ui, consts: &[String]) -> Option<(&mut String, egui::Label)> {
+    pub fn next(&mut self, ui: &egui::Ui, consts: &[String]) -> Option<(&mut String, egui::Label, usize, &ParameterDescriptor)> {
         let &(param_letter, component_idx) = self.param_letters.get(self.param)?;
 
         match self.model.params[self.param] {
@@ -161,13 +162,15 @@ impl<'it> ModelGroupIter<'it> {
                     }
                 };
                 job.append(&suffix, 0.0, egui::text::TextFormat{..Default::default()});
+                let pidx = self.param;
+                let prm = &self.model.params[pidx];
 
                 self.var += 1;
                 if self.var == pd.varcount() {
                     self.var = 0;
                     self.param += 1;
                 }
-                Some((string, egui::Label::new(job)))
+                Some((string, egui::Label::new(job), pidx, prm))
             }
         }
     }
@@ -232,7 +235,7 @@ impl Model {
         ModelGroupIter { model: self, param_letters, param: 0, var: 0 }
     }
 
-    pub fn build_params(&self, inds: &[ModelVariable], grps: &[ModelVariable]) -> Vec<f64> {
+    pub fn build_params(&self, inds: &[ModelVariable], grps: &[ModelVariable], constants: &[f64]) -> Vec<f64> {
         let mut out = vec![];
 
         let mut ind_var = 0;
@@ -248,8 +251,9 @@ impl Model {
                     out.push(grps[grp_var].val);
                     grp_var += 1;
                 }
-                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => {
-                    todo!()
+                &ParameterDescriptor::Group(GroupParameterType::Linear(cst)) => {
+                    out.push(grps[grp_var].val * constants[cst] + grps[grp_var+1].val); 
+                    grp_var += 2;
                 }
             }
         }
@@ -257,7 +261,7 @@ impl Model {
         out
     }
 
-    pub fn build_params_f64(&self, inds: &[f64], grps: &[ModelVariable]) -> Vec<f64> {
+    pub fn build_params_f64(&self, inds: &[f64], grps: &[ModelVariable], constants: &[f64]) -> Vec<f64> {
         let mut out = vec![];
 
         let mut ind_var = 0;
@@ -273,8 +277,9 @@ impl Model {
                     out.push(grps[grp_var].val);
                     grp_var += 1;
                 }
-                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => {
-                    todo!()
+                &ParameterDescriptor::Group(GroupParameterType::Linear(cst)) => {
+                    out.push(grps[grp_var].val * constants[cst] + grps[grp_var+1].val); 
+                    grp_var += 2;
                 }
             }
         }
@@ -282,7 +287,7 @@ impl Model {
         out
     }
 
-    pub fn build_params_f64f64(&self, inds: &[f64], grps: &[f64]) -> Vec<f64> {
+    pub fn build_params_f64f64(&self, inds: &[f64], grps: &[f64], constants: &[f64]) -> Vec<f64> {
         let mut out = vec![];
 
         let mut ind_var = 0;
@@ -298,8 +303,9 @@ impl Model {
                     out.push(grps[grp_var]);
                     grp_var += 1;
                 }
-                ParameterDescriptor::Group(GroupParameterType::Linear(_)) => {
-                    todo!()
+                &ParameterDescriptor::Group(GroupParameterType::Linear(cst)) => {
+                    out.push(grps[grp_var] * constants[cst] + grps[grp_var+1]); 
+                    grp_var += 2;
                 }
             }
         }
@@ -666,6 +672,23 @@ impl Default for UndoBuffer {
 }
 
 impl UndoBuffer {
+    pub fn undo(&mut self, pd: &mut ProjectData, eph: &mut Ephemerals) {
+        if let Some(act) = self.undos.pop_back() {
+            let redo = act.act(pd);
+            eph.current_circ = None;
+            eph.current_spectrum = None;
+            self.redos.push_back(redo);
+        }
+    }
+    pub fn redo(&mut self, pd: &mut ProjectData, eph: &mut Ephemerals) {
+        if let Some(act) = self.redos.pop_back() {
+            let undo = act.act(pd);
+            eph.current_circ = None;
+            eph.current_spectrum = None;
+            self.undos.push_back(undo);
+        }
+    }
+
     pub fn add_undo(&mut self, undo: Action) {
         self.redos.clear();
 
