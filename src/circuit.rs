@@ -37,11 +37,11 @@ impl Element {
     pub fn gen_individual_params(self) -> Vec<ModelVariable> {
         match self {
             Resistor => vec![ModelVariable{ val: 100., bounds: (1.0, 10000.0), enabled: true }],
-            Capacitor => vec![ModelVariable{ val: 100., bounds: (1e-6, 1.0), enabled: true }],
+            Capacitor => vec![ModelVariable{ val: 1e-4, bounds: (1e-6, 1.0), enabled: true }],
             Inductor => vec![ModelVariable{ val: 1e-4, bounds: (1e-6, 1.0), enabled: true }],
-            Warburg => vec![ModelVariable{ val: 1e-4, bounds: (1e-6, 1.0), enabled: true }],
+            Warburg => vec![ModelVariable{ val: 100., bounds: (1.0, 10000.0), enabled: true }],
             Cpe => vec![
-                ModelVariable{ val: 100., bounds: (1e-6, 1.0), enabled: true },
+                ModelVariable{ val: 1e-4, bounds: (1e-6, 1.0), enabled: true },
                 ModelVariable{ val: 0.8, bounds: (0.0, 1.0), enabled: true },
             ],
         }

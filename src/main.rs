@@ -182,7 +182,7 @@ fn render_circuit_editor(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Acti
 
                                     for sgrp in &mut iapp.prjdata.dataset {
                                         for spc in &mut sgrp.spectra {
-                                            spc.ind_params[imdl].insert(chg.start + n, nparam.clone());
+                                            spc.ind_params[imdl].insert(ivars.start + n, nparam.clone());
                                         }
                                     }
                                 }
