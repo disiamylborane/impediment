@@ -31,6 +31,7 @@ pub fn csv_to_impediment(
 ) -> Option<Vec<crate::DataPoint>> {
     csv_to_impediment_delim(text, params, b';')
         .or_else(||csv_to_impediment_delim(text, params, b','))
+        .or_else(||csv_to_impediment_delim(text, params, b' '))
 }
 
 
@@ -39,7 +40,15 @@ pub fn csv_to_impediment_delim(
             params: (crate::FreqOpenParam, crate::ImpOpenParam, usize, usize, usize, usize),
             delim: u8
 ) -> Option<Vec<crate::DataPoint>> {
-    let mut rdr = csv::ReaderBuilder::new().delimiter(delim).from_reader(text.as_bytes());
+    let mut dra_reader = text.as_bytes();
+    let skip_hdr = params.5;
+
+    for _ in 0..skip_hdr {
+        let nlpos = dra_reader.iter().position(|x| *x==b'\n')?;
+        dra_reader = &dra_reader[(nlpos+1) .. ]
+    }
+
+    let mut rdr = csv::ReaderBuilder::new().delimiter(delim).from_reader(dra_reader);
 
     let mut out = Vec::with_capacity(32);
 

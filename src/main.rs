@@ -510,10 +510,10 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
     let mut pltshow = vec![];
     let mut pltlines = vec![];
     let extractor = match iapp.editor_variables.plot_type {
-        PlotType::Nyquist => |datapoint: DataPoint| egui::plot::Value::new(datapoint.imp.re, -datapoint.imp.im),
-        PlotType::BodePhase => |d: DataPoint| egui::plot::Value::new(d.freq.log10(), -d.imp.arg().to_degrees()),
-        PlotType::BodeAmp => |d: DataPoint| egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
-        PlotType::NyquistAdmittance => |d: DataPoint| {let adm = 1.0/d.imp; egui::plot::Value::new(adm.re, adm.im)},
+        PlotType::Nyquist => |datapoint: DataPoint| egui::plot::PlotPoint::new(datapoint.imp.re, -datapoint.imp.im),
+        PlotType::BodePhase => |d: DataPoint| egui::plot::PlotPoint::new(d.freq.log10(), -d.imp.arg().to_degrees()),
+        PlotType::BodeAmp => |d: DataPoint| egui::plot::PlotPoint::new(d.freq.log10(), d.imp.norm()),
+        PlotType::NyquistAdmittance => |d: DataPoint| {let adm = 1.0/d.imp; egui::plot::PlotPoint::new(adm.re, adm.im)},
     };
 
     if let Some((k,s)) = iapp.editor_variables.current_spectrum {
@@ -522,13 +522,13 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
         let passives = spectrum.points.iter().filter(|&datapoint| !datapoint.enabled).cloned().map(extractor);
 
         let active_points = egui::plot::Points::new(
-            egui::plot::Values::from_values_iter(actives)
+            egui::plot::PlotPoints::Owned(actives.collect())
         )
         .shape(egui::plot::MarkerShape::Circle)
         .radius(4.);
 
         let passive_points = egui::plot::Points::new(
-            egui::plot::Values::from_values_iter(passives)
+            egui::plot::PlotPoints::Owned(passives.collect())
         )
         .shape(egui::plot::MarkerShape::Circle)
         .color(Color32::WHITE)
@@ -553,13 +553,13 @@ fn render_plot(ui: &mut Ui, iapp: &mut ImpedimentApp)->Result<(), Action> {
 
             let points = freqs.map(|freq| DataPoint{freq, imp: mdl.circuit.impedance(TAU*freq, &params), enabled:true}).map(extractor);
 
-            let line = egui::plot::Line::new(egui::plot::Values::from_values_iter(points)).stroke((0.5, Color32::YELLOW));
+            let line = egui::plot::Line::new(egui::plot::PlotPoints::Owned(points.collect())).stroke((0.5, Color32::YELLOW));
             pltlines.push(line);
 
             let predicted = spectrum.points.iter().map(|pt| DataPoint { freq: pt.freq, imp: mdl.circuit.impedance(TAU*pt.freq, &params), enabled: true }).map(extractor);
             
             let predicted_points = egui::plot::Points::new(
-                egui::plot::Values::from_values_iter(predicted)
+                egui::plot::PlotPoints::Owned(predicted.collect())
             )
             .shape(egui::plot::MarkerShape::Circle)
             .color(Color32::YELLOW)
@@ -1044,6 +1044,15 @@ fn display_import_window(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) 
                 ui.label("Columns");
                 ui.separator();
 
+                
+                ui.horizontal(|ui| {
+                    ui.label("Skip head");
+                    if ui.small_button("<").clicked() && impdata.skip_head > 0 {impdata.skip_head -= 1}
+                    ui.label(&impdata.skip_head.to_string());
+                    if ui.small_button(">").clicked() {impdata.skip_head += 1}
+                });
+
+
                 ui.horizontal(|ui| {
                     ui.label("Freq");
                     if ui.small_button("<").clicked() && impdata.freq_col > 0 {impdata.freq_col -= 1}
@@ -1100,7 +1109,7 @@ fn display_import_window(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) 
                             .width(ui.available_width()/2.0)
                             .height(100.0);
 
-                        let extractor = |datapoint: DataPoint| egui::plot::Value::new(datapoint.imp.re, -datapoint.imp.im);
+                        let extractor = |datapoint: DataPoint| egui::plot::PlotPoint::new(datapoint.imp.re, -datapoint.imp.im);
 
                         let dpoints = opening_data[impdata.curr_spectrum].0.iter().cloned().map(extractor);
 
@@ -1109,7 +1118,7 @@ fn display_import_window(ctx: &eframe::egui::Context, iapp: &mut ImpedimentApp) 
                         }).collect::<String>();
 
                         let dpoints = egui::plot::Points::new(
-                            egui::plot::Values::from_values_iter(dpoints)
+                            egui::plot::PlotPoints::Owned(dpoints.collect())
                         );
                         plt.show(ui, |plot_ui| {
                             plot_ui.points(dpoints);
