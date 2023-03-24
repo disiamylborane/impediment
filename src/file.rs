@@ -45,11 +45,9 @@ pub fn csv_to_impediment_delim(
     let mut rec_iter = rdr.records();
     let first_rec = rec_iter.next()?.ok()?;
 
-    rec_to_datapiece(&first_rec, params).map_or_else(|| {
-        // let _s = first_rec;
-    }, |fdrec| {
+    if let Some(fdrec) = rec_to_datapiece(&first_rec, params) {
         out.push(fdrec);
-    });
+    }
 
     for rec in rec_iter {
         let rec = rec.ok()?;

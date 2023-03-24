@@ -173,7 +173,7 @@ impl Circuit {
                 };
                 ParameterDesc{ vals: vec![pd.0], bounds: vec![pd.1] }
             }
-            Self::Series(s)|Circuit::Parallel(s) => {
+            Self::Series(s) | Self::Parallel(s) => {
                 let mut evals = vec![];
                 let mut ebounds = vec![];
                 for ParameterDesc{mut vals, mut bounds} in s.iter().map(Self::generate_new_params) {
@@ -191,12 +191,12 @@ impl Circuit {
 
     pub fn param_names_rec(&self, mut start_index: usize) -> (Vec<String>, usize) {
         match self {
-            Circuit::Element(Element::Resistor) => (vec![format!("R{}", start_index)], start_index+1),
-            Circuit::Element(Element::Capacitor) => (vec![format!("C{}", start_index)], start_index+1),
-            Circuit::Element(Element::Inductor) => (vec![format!("L{}", start_index)], start_index+1),
-            Circuit::Element(Element::Warburg) => (vec![format!("W{}", start_index)], start_index+1),
-            Circuit::Element(Element::Cpe) => (vec![format!("Q{}", start_index), format!("n{}", start_index)], start_index+1),
-            Circuit::Series(elems)|Circuit::Parallel(elems) => {
+            Self::Element(Element::Resistor) => (vec![format!("R{start_index}")], start_index+1),
+            Self::Element(Element::Capacitor) => (vec![format!("C{start_index}")], start_index+1),
+            Self::Element(Element::Inductor) => (vec![format!("L{start_index}")], start_index+1),
+            Self::Element(Element::Warburg) => (vec![format!("W{start_index}")], start_index+1),
+            Self::Element(Element::Cpe) => (vec![format!("Q{start_index}"), format!("n{start_index}")], start_index+1),
+            Self::Series(elems) | Self::Parallel(elems) => {
                 let mut out = vec![];
                 for e in elems {
                     let ps = e.param_names_rec(start_index);
@@ -210,14 +210,14 @@ impl Circuit {
 
     pub fn painted_size(&self) -> (u16, u16) {
         match self {
-            Circuit::Element(_) => (2,2),
+            Self::Element(_) => (2,2),
 
-            Circuit::Series(elems) => 
+            Self::Series(elems) => 
                 elems.iter()
                      .map(Self::painted_size)
                      .fold((0,0), |a, b| (a.0+b.0, std::cmp::max(a.1,b.1))),
 
-            Circuit::Parallel(elems) =>  {
+            Self::Parallel(elems) =>  {
                 let s = elems.iter()
                              .map(Self::painted_size)
                              .fold((0,0), |a, b| (std::cmp::max(a.0,b.0), a.1+b.1));
@@ -229,22 +229,22 @@ impl Circuit {
     pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32)->usize {
         let stroke = Stroke::new(1., color);
         match self {
-            Circuit::Element(Element::Resistor) => {
+            Self::Element(Element::Resistor) => {
                 painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize/4., blocksize/2.)], stroke);
                 painter.rect_stroke(Rect::from_min_size(pos+vec2(blocksize/4., blocksize/4.), vec2(blocksize*3./2., blocksize/2.)), 0., stroke);
                 painter.line_segment([pos+vec2(blocksize*7./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
-                sign_element(painter, &format!("R{}", start_index), pos, blocksize, color);
+                sign_element(painter, &format!("R{start_index}"), pos, blocksize, color);
                 start_index+1
             }
-            Circuit::Element(Element::Capacitor) => {
+            Self::Element(Element::Capacitor) => {
                 painter.line_segment([pos+vec2(0., blocksize/2.), pos+vec2(blocksize*3./4., blocksize/2.)], stroke);
                 painter.line_segment([pos+vec2(blocksize*3./4., 0.), pos+vec2(blocksize*3./4., blocksize)], stroke);
                 painter.line_segment([pos+vec2(blocksize*5./4., 0.), pos+vec2(blocksize*5./4., blocksize)], stroke);
                 painter.line_segment([pos+vec2(blocksize*5./4., blocksize/2.), pos+vec2(blocksize*2., blocksize/2.)], stroke);
-                sign_element(painter, &format!("C{}", start_index), pos, blocksize, color);
+                sign_element(painter, &format!("C{start_index}"), pos, blocksize, color);
                 start_index+1
             },
-            Circuit::Element(Element::Inductor) => {
+            Self::Element(Element::Inductor) => {
                 let mut curr_pos = vec2(0., blocksize/2.);
 
                 let mut lineto = |newpos| {
@@ -264,11 +264,11 @@ impl Circuit {
                 lineto(vec2(blocksize*21./12., blocksize/2.));
                 lineto(vec2(blocksize*2., blocksize/2.));
 
-                sign_element(painter, &format!("L{}", start_index), pos, blocksize, color);
+                sign_element(painter, &format!("L{start_index}"), pos, blocksize, color);
                 start_index+1
             }
 
-            Circuit::Element(Element::Warburg) => {
+            Self::Element(Element::Warburg) => {
                 let line = |p1,p2| {
                     painter.line_segment([pos+p1*blocksize, pos+p2*blocksize], stroke);
                 };
@@ -279,11 +279,11 @@ impl Circuit {
                 line(vec2(1.25, 0.5), vec2(1.5, 1.0));
                 line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                sign_element(painter, &format!("W{}", start_index), pos, blocksize, color);
+                sign_element(painter, &format!("W{start_index}"), pos, blocksize, color);
                 start_index+1
             }
 
-            Circuit::Element(Element::Cpe) => {
+            Self::Element(Element::Cpe) => {
                 let line = |p1,p2| {
                     painter.line_segment([pos+p1*blocksize, pos+p2*blocksize], stroke);
                 };
@@ -295,11 +295,11 @@ impl Circuit {
                 line(vec2(1.25, 0.5), vec2(1.5, 1.0));
                 line(vec2(1.25, 0.5), vec2(2.0, 0.5));
 
-                sign_element(painter, &format!("Z{}", start_index), pos, blocksize, color);
+                sign_element(painter, &format!("Z{start_index}"), pos, blocksize, color);
                 start_index+1
             }
 
-            Circuit::Series(elems) => {
+            Self::Series(elems) => {
                 let mut index = elems[0].paint(pos, blocksize, painter, start_index, color);
                 let mut pos = pos + vec2(f32::from(elems[0].painted_size().0) * blocksize, 0.);
 
@@ -310,7 +310,7 @@ impl Circuit {
                 index
             }
 
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 let mut index = start_index;
                 let mut y = pos.y;
                 let xsize = self.painted_size().0;
@@ -342,24 +342,24 @@ impl Circuit {
 
     pub fn paramlen(&self) -> usize {
         match self {
-            Circuit::Element(Resistor|Capacitor|Inductor|Warburg) => 1,
-            Circuit::Element(Cpe) => 2,
-            Circuit::Series(elems)|Circuit::Parallel(elems) => 
+            Self::Element(Resistor|Capacitor|Inductor|Warburg) => 1,
+            Self::Element(Cpe) => 2,
+            Self::Series(elems)|Self::Parallel(elems) => 
                 elems.iter().map(Self::paramlen).sum(),
         }
     }
 
     fn _impedance(&self, omega: f64, params: &[f64]) -> Cplx{
         match self {
-            Circuit::Element(Element::Resistor) => Cplx::new(params[0], 0.0),
+            Self::Element(Element::Resistor) => Cplx::new(params[0], 0.0),
 
-            Circuit::Element(Element::Capacitor) => 1.0 / (I * omega * params[0]),
+            Self::Element(Element::Capacitor) => 1.0 / (I * omega * params[0]),
 
-            Circuit::Element(Element::Inductor) => I * omega * params[0],
+            Self::Element(Element::Inductor) => I * omega * params[0],
 
-            Circuit::Element(Element::Warburg) => (1.0 - I) * params[0] / omega.sqrt(),
+            Self::Element(Element::Warburg) => (1.0 - I) * params[0] / omega.sqrt(),
 
-            Circuit::Element(Element::Cpe) => {
+            Self::Element(Element::Cpe) => {
                 let q = params[0];
                 let n = params[1];
                 let numer = (-I*PI/2.0*n).exp();
@@ -367,7 +367,7 @@ impl Circuit {
                 numer/denom
             }
 
-            Circuit::Series(elems) => {
+            Self::Series(elems) => {
                 let mut cval = 0;
                 let mut imped = Cplx::new(0.0, 0.0);
                 for c in elems.iter() {
@@ -380,7 +380,7 @@ impl Circuit {
                 imped
             }
 
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 let mut cval = 0;
                 let mut admit = Cplx::new(0.0, 0.0);
                 for c in elems.iter() {
@@ -406,15 +406,15 @@ impl Circuit {
             panic!()
         }
         match self {
-            Circuit::Element(Element::Resistor) => Cplx::new(1.0, 0.0),
+            Self::Element(Element::Resistor) => Cplx::new(1.0, 0.0),
 
-            Circuit::Element(Element::Capacitor) => I / (omega * params[0].powi(2)),
+            Self::Element(Element::Capacitor) => I / (omega * params[0].powi(2)),
 
-            Circuit::Element(Element::Inductor) => I * omega,
+            Self::Element(Element::Inductor) => I * omega,
 
-            Circuit::Element(Element::Warburg) => ((1.0 - I)*params[0])/(omega.sqrt()),
+            Self::Element(Element::Warburg) => ((1.0 - I)*params[0])/(omega.sqrt()),
 
-            Circuit::Element(Element::Cpe) => {
+            Self::Element(Element::Cpe) => {
                 let q = params[0];
                 let n = params[1];
                 let numer = (-I*PI/2.0*n).exp();
@@ -426,7 +426,7 @@ impl Circuit {
                 }
             }
 
-            Circuit::Series(elems) => {
+            Self::Series(elems) => {
                 let mut cval = 0;
                 for c in elems.iter() {
                     let cend = cval + c.paramlen();
@@ -439,7 +439,7 @@ impl Circuit {
                 unreachable!()
             }
 
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 let mut cval = 0;
                 for c in elems.iter() {
                     let cend = cval + c.paramlen();
@@ -463,13 +463,13 @@ impl Circuit {
                 param_idx: usize,
                 editability: &mut Vec<ParameterEditability>) {
         match self {
-            Circuit::Element(e) => {
+            Self::Element(e) => {
                 e.exchange_param(element, param_idx, paramlist, editability);
                 editability[param_idx] = ParameterEditability::Plural;
                 *self = Self::Element(element);
             },
 
-            Circuit::Series(elems) => {
+            Self::Series(elems) => {
                 assert!(elems.len() > 1);
                 if let Some((i, start_x)) = series_index_by_block(elems, coord) {
                     let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
@@ -478,7 +478,7 @@ impl Circuit {
                 }
             }
 
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 assert!(elems.len() > 1);
                 let ib = parallel_index_by_block(elems, coord);
 
@@ -502,17 +502,17 @@ impl Circuit {
 
     pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
         match self {
-            Circuit::Element(e) => {
+            Self::Element(e) => {
                 let new = Self::Series(vec![Self::Element(*e), Self::Element(element)]);
                 let paramlen = self.paramlen();
                 element.insert_param(param_idx+paramlen, paramlist, editability);
                 *self = new;
             },
 
-            Circuit::Series(elems) => {
+            Self::Series(elems) => {
                 assert!(elems.len() > 1);
                 if let Some((i, start_x)) = series_index_by_block(elems, coord) {
-                    if let Circuit::Element(_) = elems[i] {
+                    if let Self::Element(_) = elems[i] {
                         let new_pidx = param_idx + (0..=i).map(|el| elems[el].paramlen()).sum::<usize>();
                         elems.insert(i+1, Self::Element(element));
                         element.insert_param(new_pidx, paramlist, editability);
@@ -524,7 +524,7 @@ impl Circuit {
                 }
             }
 
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 assert!(elems.len() > 1);
                 let ib = parallel_index_by_block(elems, coord);
 
@@ -575,18 +575,18 @@ impl Circuit {
 
     pub fn _remove(&mut self, coord: (u16, u16), paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>) {
         match self {
-            Circuit::Element(_) => {},
+            Self::Element(_) => {},
 
-            Circuit::Series(elems) => {
+            Self::Series(elems) => {
                 assert!(elems.len() > 1);
                 
                 if let Some((i,start_x)) = series_index_by_block(elems, coord) {
                     let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
                     let elemlen = elems.len();
-                    if let Circuit::Element(el) = &mut elems[i] {
+                    if let Self::Element(el) = &mut elems[i] {
                         el.remove_param(new_pidx, paramlist, editability);
                         if elemlen == 2 {
-                            *self = elems[if i == 0 {1} else {0}].clone();
+                            *self = elems[usize::from(i == 0)].clone();
                         }
                         else {
                             elems.remove(i);
@@ -598,7 +598,7 @@ impl Circuit {
                 }
             }
 
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 assert!(elems.len() > 1);
                 let ib = parallel_index_by_block(elems, coord);
 
@@ -606,10 +606,10 @@ impl Circuit {
                     ParallelBlockPicked::Child(i, elemblock, start_y) => {
                         let new_pidx = param_idx + (0..i).map(|el| elems[el].paramlen()).sum::<usize>();
                         let elemlen = elems.len();
-                        if let Circuit::Element(el) = &mut elems[i] {
+                        if let Self::Element(el) = &mut elems[i] {
                             el.remove_param(new_pidx, paramlist, editability);
                             if elemlen == 2 {
-                                *self = elems[if i == 0 {1} else {0}].clone();
+                                *self = elems[usize::from(i == 0)].clone();
                             }
                             else {
                                 elems.remove(i);
@@ -633,17 +633,17 @@ impl Circuit {
 impl std::fmt::Display for Circuit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Circuit::Element(Element::Resistor) => write!(f, "R"),
-            Circuit::Element(Element::Capacitor) => write!(f, "C"),
-            Circuit::Element(Element::Inductor) => write!(f, "L"),
-            Circuit::Element(Element::Warburg) => write!(f, "W"),
-            Circuit::Element(Element::Cpe) => write!(f, "Q"),
-            Circuit::Series(elems) => {
+            Self::Element(Element::Resistor) => write!(f, "R"),
+            Self::Element(Element::Capacitor) => write!(f, "C"),
+            Self::Element(Element::Inductor) => write!(f, "L"),
+            Self::Element(Element::Warburg) => write!(f, "W"),
+            Self::Element(Element::Cpe) => write!(f, "Q"),
+            Self::Series(elems) => {
                 write!(f, "[")?;
                 for e in elems { e.fmt(f)?; }
                 write!(f, "]")
             }
-            Circuit::Parallel(elems) => {
+            Self::Parallel(elems) => {
                 write!(f, "{{")?;
                 for e in elems { e.fmt(f)?; }
                 write!(f, "}}")

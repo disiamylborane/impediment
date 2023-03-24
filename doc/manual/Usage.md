@@ -94,7 +94,7 @@ the same circuit.
 
 # CSV loading
 
-The CSV loading procedure allows to load nultiple files with the same data layout
+The CSV loading procedure allows to load multiple files with the same data layout
 at once. After the files are selected, customize the CSV column numbers for
 frequency, real and imaginary impedance values. The data preview is available.
 

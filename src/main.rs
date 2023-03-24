@@ -6,7 +6,7 @@ use float_pretty_print::PrettyPrintFloat;
 use std::{fmt::Display, str::FromStr};
 
 use circuit::Circuit;
-use eframe::{egui::{self, Color32, Vec2, vec2, plot::Value}};
+use eframe::egui::{self, Color32, Vec2, vec2, plot::Value};
 
 
 #[derive(Debug, Copy, Clone)]
@@ -18,18 +18,28 @@ pub struct DataPiece {
 use crate::circuit::Element;
 
 mod circuit;
-mod data;
 mod file;
 
 pub type Cplx = num::complex::Complex<f64>;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum FitMethod { BOBYQA, TNC, SLSQP, LBfgsB }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+impl FitMethod {
+    const fn into_nlopt(self) -> nlopt::Algorithm{
+        match self {
+            Self::BOBYQA => nlopt::Algorithm::Bobyqa,
+            Self::TNC => nlopt::Algorithm::TNewton,
+            Self::SLSQP => nlopt::Algorithm::Slsqp,
+            Self::LBfgsB => nlopt::Algorithm::Lbfgs,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum ElectricComponent { R, C, W, L, Q }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum ComponentInteraction { Change, Series, Parallel, Delete }
 
 #[derive(Debug, Clone)]
@@ -112,7 +122,7 @@ pub struct Model {
     lock: bool,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FreqOpenParam {Hz, Khz, Rads, Krads}
 impl Display for FreqOpenParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -120,7 +130,7 @@ impl Display for FreqOpenParam {
         write!(f, "{}", match self {Hz => "Hz", Khz => "kHz", Rads => "rad/s", Krads => "krad/s",})
     }
 }
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ImpOpenParam {PlusOhm, MinusOhm, PlusKohm, MinusKohm}
 impl Display for ImpOpenParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -129,7 +139,7 @@ impl Display for ImpOpenParam {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PlotType {Nyquist, BodePhase, BodeAmp, AdmGodog}
 
 pub struct TemplateApp {
@@ -194,7 +204,7 @@ impl TemplateApp {
         let mut models = vec![];
 
         loop {
-            let linestart = lines.get(0)?;
+            let linestart = lines.first()?;
             let marker = "Model ";
             if let Some(name) = linestart.strip_prefix(marker) {
                 let circuit = Circuit::from_str( lines.get(1)? ).ok()?;
@@ -209,12 +219,12 @@ impl TemplateApp {
 
         let mut datasets = vec![];
         loop {
-            let linestart = lines.get(0)?;
+            let linestart = lines.first()?;
             let marker = "Dataset ";
             let mut data = vec![];
             if let Some(name) = linestart.strip_prefix(marker) {
                 lines = &lines[1..];
-                while let Some(dp) = lines.get(0).and_then(|x| datapiece_from_string(x))  {
+                while let Some(dp) = lines.first().and_then(|x| datapiece_from_string(x))  {
                     data.push(dp);
                     lines = &lines[1..];
                 }
@@ -227,14 +237,14 @@ impl TemplateApp {
 
         let mut paramsets = vec![];
         let mut curr_circ = 0;
-        while let Some(linestart) = lines.get(0) {
+        while let Some(linestart) = lines.first() {
             let marker = "Paramlist for Circuit ";
             let mut pset = vec![];
             if let Some(circ) = linestart.strip_prefix(marker).and_then(|x| x.strip_suffix(':')).and_then(|x|x.parse::<usize>().ok()) {
                 if curr_circ != circ {return None;}
                 for _ in 0..datasets.len() {
                     lines = &lines[1..];
-                    let (val_str,bounds_str) = lines.get(0)?.split_once(" with bounds ")?;
+                    let (val_str,bounds_str) = lines.first()?.split_once(" with bounds ")?;
                     let vals = val_str.trim()
                                      .strip_prefix('[')
                                      .and_then(|x| x.strip_suffix(']'))?
@@ -334,7 +344,6 @@ fn block_by_coords(circuit: &Circuit, widsize: Vec2, clickpos: Vec2, blocksize: 
 
     let (x,y) = (x_circ / blocksize, y_circ / blocksize);
 
-    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     Some((x as u16, y as u16))
 }
 
@@ -492,182 +501,205 @@ fn display_import_window(
     );
 }
 
-
-impl eframe::App for TemplateApp {
-    /*fn name(&self) -> &str {
-        "Impediment"
-    }*/
-
-    #[allow(clippy::too_many_lines)]
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.set_visuals(egui::Visuals::dark());
-
+impl TemplateApp {
+    fn model_list_control(&mut self, ui: &mut egui::Ui) {
         let Self {
-            fit_method, 
+            models,
+            current_circ,
+            datasets,
+            str_params,
+        ..} = self;
+        ui.horizontal(|ui| {
+            let btnplus = ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");});
+            if btnplus.clicked() {
+                let newmodel = Model {
+                    circuit: Circuit::Element(Element::Resistor),
+                    name: "new model".to_string(),
+                    parameters: vec![ParameterEditability::Plural],
+                    lock: false,
+                };
+                str_params.push(
+                    vec![StringParameterDesc{
+                        vals: vec!["10.".into()],
+                        bounds: vec![("0.1".into(), "100000".into())]
+                    }; datasets.len()]
+                );
+                models.push(newmodel);
+            };
+
+            let dupbutton = ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");});
+            if dupbutton.clicked() {
+                str_params.push(str_params[*current_circ].clone());
+                models.push(models[*current_circ].clone());
+            };
+
+            let delbutton = ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");});
+            if delbutton.clicked() && models.len() > 1 {
+                models.remove(*current_circ);
+                str_params.remove(*current_circ);
+                if *current_circ != 0 {*current_circ -= 1;}
+            };
+            if ui.button("Up").clicked() && *current_circ > 0 {
+                (models as &mut[_]).swap(*current_circ, *current_circ - 1);
+                (str_params as &mut[_]).swap(*current_circ, *current_circ - 1);
+                *current_circ -= 1;
+            }
+            if ui.button("Down").clicked() && *current_circ < models.len() - 1 {
+                (models as &mut[_]).swap(*current_circ, *current_circ + 1);
+                (str_params as &mut[_]).swap(*current_circ, *current_circ + 1);
+                *current_circ += 1;
+            }
+        });
+    }
+
+    fn circuit_edit_buttons(&mut self, ui: &mut egui::Ui) {
+        let Self {
+            component, 
+            interaction,
+        ..} = self;
+
+        ui.horizontal(|ui| {
+            ui.selectable_value(component, ElectricComponent::R, "R").on_hover_ui(|ui| {ui.label("Resistor");});
+            ui.selectable_value(component, ElectricComponent::C, "C").on_hover_ui(|ui| {ui.label("Capacitor");});
+            ui.selectable_value(component, ElectricComponent::L, "L").on_hover_ui(|ui| {ui.label("Inductor");});
+            ui.selectable_value(component, ElectricComponent::W, "W").on_hover_ui(|ui| {ui.label("Warburg");});
+            ui.selectable_value(component, ElectricComponent::Q, "Q").on_hover_ui(|ui| {ui.label("Constant phase");});
+
+            ui.separator();
+
+            ui.selectable_value(interaction, ComponentInteraction::Change, ":").on_hover_ui(|ui| {ui.label("Replace");});
+            ui.selectable_value(interaction, ComponentInteraction::Series, "--").on_hover_ui(|ui| {ui.label("Add series");});
+            ui.selectable_value(interaction, ComponentInteraction::Parallel, "=").on_hover_ui(|ui| {ui.label("Add parallel");});
+            ui.selectable_value(interaction, ComponentInteraction::Delete, "x").on_hover_ui(|ui| {ui.label("Remove clicked");});
+        });
+    }
+
+    fn circuit_plot(&mut self, ui: &mut egui::Ui) {
+        let Self {
             component, 
             interaction,
             models,
             current_circ,
-            current_dataset,
-            datasets,
             str_params,
-            editor,
-            opening_data,
-            opening_mode,
-            copied_paramlist,
-            plot_type,
-            text_status,
         ..} = self;
+        let blocksize = 10.;
+        let size = egui::vec2(200.0, 100.0);
+        let (response, painter) = ui.allocate_painter(size, egui::Sense::click());
+        painter.rect_filled(response.rect, 0., Color32::from_rgb(80, 80, 80));
+        if let Some(c) = models.get_mut(*current_circ) {
+            let widsize = size;
+            let size = c.circuit.painted_size();
+            let size = egui::vec2(size.0.into(), size.1.into())*blocksize;
+            c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0, if c.lock {Color32::WHITE} else {Color32::LIGHT_RED});
 
-        if !opening_data.is_empty() {
-            display_import_window(ctx, opening_mode, opening_data, datasets, str_params);
-        }
+            if response.clicked() && !c.lock {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let user_element = match component {
+                        ElectricComponent::R => Element::Resistor,
+                        ElectricComponent::C => Element::Capacitor,
+                        ElectricComponent::W => Element::Warburg,
+                        ElectricComponent::L => Element::Inductor,
+                        ElectricComponent::Q => Element::Cpe,
+                    };
 
-        egui::SidePanel::left("models").show(ctx, |ui| {
-            ui.vertical_centered_justified( |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");}).clicked() {
-                        let newmodel = Model {
-                            circuit: Circuit::Element(Element::Resistor),
-                            name: "new model".to_string(),
-                            parameters: vec![ParameterEditability::Plural],
-                            lock: false,
-                        };
-                        str_params.push(
-                            vec![StringParameterDesc{
-                                vals: vec!["10.".into()],
-                                bounds: vec![("0.1".into(), "100000".into())]
-                            }; datasets.len()]
-                        );
-                        models.push(newmodel);
-                    };
-                    if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");}).clicked() {
-                        str_params.push(str_params[*current_circ].clone());
-                        models.push(models[*current_circ].clone());
-                    };
-                    if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");}).clicked() && models.len() > 1 {
-                        models.remove(*current_circ);
-                        str_params.remove(*current_circ);
-                        if *current_circ != 0 {*current_circ -= 1;}
-                    };
-                    if ui.button("Up").clicked() && *current_circ > 0 {
-                        (models as &mut[_]).swap(*current_circ, *current_circ - 1);
-                        (str_params as &mut[_]).swap(*current_circ, *current_circ - 1);
-                        *current_circ -= 1;
-                    }
-                    if ui.button("Down").clicked() && *current_circ < models.len() - 1 {
-                        (models as &mut[_]).swap(*current_circ, *current_circ + 1);
-                        (str_params as &mut[_]).swap(*current_circ, *current_circ + 1);
-                        *current_circ += 1;
-                    }
-                });
-    
-                ui.separator();
-    
-                ui.horizontal(|ui| {
-                    ui.selectable_value(component, ElectricComponent::R, "R").on_hover_ui(|ui| {ui.label("Resistor");});
-                    ui.selectable_value(component, ElectricComponent::C, "C").on_hover_ui(|ui| {ui.label("Capacitor");});
-                    ui.selectable_value(component, ElectricComponent::L, "L").on_hover_ui(|ui| {ui.label("Inductor");});
-                    ui.selectable_value(component, ElectricComponent::W, "W").on_hover_ui(|ui| {ui.label("Warburg");});
-                    ui.selectable_value(component, ElectricComponent::Q, "Q").on_hover_ui(|ui| {ui.label("Constant phase");});
-    
-                    ui.separator();
-    
-                    ui.selectable_value(interaction, ComponentInteraction::Change, ":").on_hover_ui(|ui| {ui.label("Replace");});
-                    ui.selectable_value(interaction, ComponentInteraction::Series, "--").on_hover_ui(|ui| {ui.label("Add series");});
-                    ui.selectable_value(interaction, ComponentInteraction::Parallel, "=").on_hover_ui(|ui| {ui.label("Add parallel");});
-                    ui.selectable_value(interaction, ComponentInteraction::Delete, "x").on_hover_ui(|ui| {ui.label("Remove clicked");});
-                });
-    
-                let blocksize = 10.;
-                let size = egui::vec2(200.0, 100.0);
-                let (response, painter) = ui.allocate_painter(size, egui::Sense::click());
-                painter.rect_filled(response.rect, 0., Color32::from_rgb(80, 80, 80));
-                if let Some(c) = models.get_mut(*current_circ) {
-                    let widsize = size;
-                    let size = c.circuit.painted_size();
-                    let size = egui::vec2(size.0.into(), size.1.into())*blocksize;
-                    c.circuit.paint(response.rect.min + (widsize-size)/2., blocksize, &painter, 0, if c.lock {Color32::WHITE} else {Color32::LIGHT_RED});
-    
-                    if response.clicked() && !c.lock {
-                        if let Some(pos) = response.interact_pointer_pos() {
-                            let user_element = match component {
-                                ElectricComponent::R => (Element::Resistor),
-                                ElectricComponent::C => (Element::Capacitor),
-                                ElectricComponent::W => (Element::Warburg),
-                                ElectricComponent::L => (Element::Inductor),
-                                ElectricComponent::Q => (Element::Cpe),
-                            };
-    
-                            let canvas_pos = pos - response.rect.min;
-                            let block = block_by_coords(&c.circuit, widsize, canvas_pos, blocksize);
-                            if let Some(block) = block {
-                                match interaction {
-                                    ComponentInteraction::Change => {
-                                        c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters);
-                                    },
-                                    ComponentInteraction::Series => {
-                                        c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
-                                    },
-                                    ComponentInteraction::Parallel => {
-                                        c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
-                                    }
-                                    ComponentInteraction::Delete => {
-                                        c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
-                                    }
-                                }
+                    let canvas_pos = pos - response.rect.min;
+                    let block = block_by_coords(&c.circuit, widsize, canvas_pos, blocksize);
+                    if let Some(block) = block {
+                        match interaction {
+                            ComponentInteraction::Change => {
+                                c.circuit.replace(block, user_element, str_params[*current_circ].iter_mut(), &mut c.parameters);
+                            },
+                            ComponentInteraction::Series => {
+                                c.circuit._add_series(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
+                            },
+                            ComponentInteraction::Parallel => {
+                                c.circuit._add_parallel(block, user_element, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
+                            }
+                            ComponentInteraction::Delete => {
+                                c.circuit._remove(block, str_params[*current_circ].iter_mut(), 0, &mut c.parameters);
                             }
                         }
                     }
                 }
-    
-                if models[*current_circ].lock {
-                    if ui.small_button("Unlock").clicked() {
-                        models[*current_circ].lock = false;
-                    }
-                } else {
-                    ui.add_enabled(false, egui::Button::new("Unlock").small());
-                }
-    
+            }
+        }
+
+        if models[*current_circ].lock {
+            if ui.small_button("Unlock").clicked() {
+                models[*current_circ].lock = false;
+            }
+        } else {
+            ui.add_enabled(false, egui::Button::new("Unlock").small());
+        }
+
+    }
+
+    fn left_panel(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+
+        egui::SidePanel::left("models").show(ctx, |ui| {
+            ui.vertical_centered_justified( |ui| {
+                self.model_list_control(ui);
+
                 ui.separator();
-    
+
+                self.circuit_edit_buttons(ui);
+
+                self.circuit_plot(ui);
+
+                ui.separator();
+
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (i, c) in models.iter_mut().enumerate() {
+                    for (i, c) in self.models.iter_mut().enumerate() {
                         let tedit = egui::TextEdit::singleline(&mut c.name);
-                        let tedit = if *current_circ==i {tedit.text_color(Color32::RED)} else {tedit};
+                        let tedit = if self.current_circ==i {tedit.text_color(Color32::RED)} else {tedit};
                         if ui.add(tedit).clicked() {
-                            *current_circ=i;
+                            self.current_circ=i;
                         };
                     }
                 });
             });
         });
+
+    }
+
+    pub fn dataset_panel(&mut self, ctx: &egui::Context) {
+        let Self {
+            models,
+            current_dataset,
+            datasets,
+            str_params,
+            editor,
+            opening_data,
+        ..} = self;
+
         egui::SidePanel::right("rdata").show(ctx, |ui| {
             ui.vertical_centered( |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Import").on_hover_ui(|ui| {ui.label("Load a dataset");}).clicked() {
+                    let load_dataset_btn = ui.button("Import").on_hover_ui(|ui| {ui.label("Load a dataset");});
+                    if load_dataset_btn.clicked() {
                         if let Ok(files) = native_dialog::FileDialog::new()
                         .show_open_multiple_file() {
                             let vcd = files.into_iter().map(|ref f| {
                                 use std::io::BufRead;
-                                if let Ok(file) = std::fs::File::open(f) {
-                                    let buf = std::io::BufReader::new(file);
-                                    let lines = buf.lines().fold(String::with_capacity(256), |mut x,y| {x.extend(y); x.push('\n'); x});
-                                    let fname = f.file_name().map_or(String::new(), |x| x.to_string_lossy().to_string());
-                                    Ok((lines, fname))
-                                } else {Err(f.to_string_lossy().to_string())}
+                                std::fs::File::open(f).map_or_else(
+                                    |_| Err(f.to_string_lossy().to_string()), 
+                                    |file| {
+                                        let buf = std::io::BufReader::new(file);
+                                        let lines = buf.lines().fold(String::with_capacity(256), |mut x,y| {x.extend(y); x.push('\n'); x});
+                                        let fname = f.file_name().map_or(String::new(), |x| x.to_string_lossy().to_string());
+                                        Ok((lines, fname))
+                                    }
+                                )
                             }).collect::<Result<Vec<(String, String)>, String>>();
                             match vcd {
                                 Ok(v) => {
                                   *opening_data = v;
                                 }
-                                Err(e) => println!("Error: {}", e),
+                                Err(e) => println!("Error: {e}"),
                             }
                         }
                     }
-    
-                    // ui.button("Save");
-    
+
                     if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
                         datasets.push((vec![], "new dataset".into()));
                         for (p, m) in str_params.iter_mut().zip(models.iter_mut()) {
@@ -718,229 +750,304 @@ impl eframe::App for TemplateApp {
                 });
             });
         });
+    }
+
+    fn project_files(&mut self, ui: &mut egui::Ui) {
+        let Self {
+            models,
+            current_circ,
+            current_dataset,
+            datasets,
+            str_params,
+            opening_data,
+            copied_paramlist,
+            text_status,
+        ..} = self;
+
+        if ui.button("Save project as").clicked() {
+            try_into_numbers(str_params).map_or_else(|| {
+                *text_status = "Can't save due to errors in parameters".into();
+            }, |nparams| if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
+                    if let Ok(mut file) = std::fs::File::create(filename) {
+                        Self::save_to_string(models, datasets, &nparams).map_or_else(|_| {
+                            println!("Error writing to the file");
+                        }, |string| {
+                            use std::io::Write;
+                            writeln!(&mut file, "{string}").unwrap();
+                        });
+                    }
+                });
+        }
+
+        if ui.button("Load project").clicked() {
+            if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_open_single_file() {
+                if let Ok(sfile) = std::fs::read_to_string(filename) {
+                    if let Some((m, d, p)) = Self::load_from_string(&sfile) {
+                        *models = m;
+                        *datasets = d;
+                        *str_params = p.into_iter().map(|ds| ds.into_iter().map(Into::into).collect()).collect();
+                        *current_circ = 0;
+                        *current_dataset = 0;
+                        *opening_data = vec![];
+                        *copied_paramlist = None;
+                    }
+                }
+            }                        
+        }
+    }
+
+    fn fitting_box(&mut self, ui: &mut egui::Ui) {
+        let Self {
+            fit_method, 
+            models,
+            current_circ,
+            current_dataset,
+            datasets,
+            str_params,
+            text_status,
+        ..} = self;
+
+        ui.horizontal_wrapped(|ui| {
+            let btnfit = ui.button("Fit").clicked();
+            let btnfitlog = ui.button("Fit log").clicked();
+            
+            if btnfit || btnfitlog {
+                models[*current_circ].lock = true;
+                if let Ok(mut paramlist) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
+                    type LossFunction<'a> = dyn Fn(&[f64], Option<&mut [f64]>, &mut ()) -> f64 + 'a;
+
+                    let loss_linear = |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
+                        let circ = &models[*current_circ].circuit;
+                        if let Some(gout) = &mut gradient_out {
+                            for g in gout.iter_mut() { *g = 0.0; }
+                        };
+                        let exps = &datasets[*current_dataset].0;
+
+                        let mut loss = 0.0_f64;
+                        for point in exps {
+                            let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
+                            let diff = model_imp - point.imp;
+                            loss += diff.norm_sqr() / point.imp.norm_sqr();
+
+                            if let Some(gout) = &mut gradient_out {
+                                for i in 0..gout.len() {
+                                    let dmdx = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
+                                    // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
+                                    let ml = (point.imp-model_imp)*dmdx.conj().re * 2.0;
+                                    gout[i] += -1.0 / point.imp.norm_sqr() * ml.re;
+                                }
+                            };
+                        }
+                    
+                        loss
+                    };
+
+                    let loss_log = |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
+                        let circ = &models[*current_circ].circuit;
+                        if let Some(gout) = &mut gradient_out {
+                            for i in 0..gout.len() {
+                                gout[i] = 0.0;
+                            }
+                        };
+                        let exps = &datasets[*current_dataset].0;
+
+                        let mut loss = 0.0_f64;
+                        for point in exps {
+                            let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
+                            loss += (model_imp/point.imp).ln().norm_sqr();
+
+                            if let Some(gout) = &mut gradient_out {
+                                for i in 0..gout.len() {
+                                    let dzdparam = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
+
+                                    let dzdparam1z = 1.0/model_imp * dzdparam;
+                                    let lnzz = (model_imp/point.imp).ln();
+                                    let d = dzdparam1z * lnzz.conj() + lnzz * dzdparam1z.conj();
+                                    // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
+                                    gout[i] += d.re;
+                                }
+                            };
+                        }
+                    
+                        loss
+                    };
+
+                    let loss_function: &LossFunction = if btnfit { &loss_linear } else { &loss_log };
+
+                    let mut opt = nlopt::Nlopt::new(fit_method.into_nlopt(), paramlist.vals.len(), loss_function, nlopt::Target::Minimize, ());
+
+                    opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
+                    opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
+                    opt.set_maxeval(u32::MAX).unwrap();
+                    opt.set_maxtime(10.0).unwrap();
+
+                    opt.set_xtol_rel(1e-10).unwrap();
+
+                    let optresult = opt.optimize(&mut paramlist.vals);
+
+                    if optresult.is_ok() {
+                        str_params[*current_circ][*current_dataset] = paramlist.into();
+                    };
+                    *text_status = Self::make_text_status(optresult);
+                    println!("{optresult:?}");
+                }
+            }
+
+            egui::ComboBox::from_id_source("Select_method")
+                .selected_text(format!("{fit_method:?}"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(fit_method, FitMethod::BOBYQA, "Bobyqa");
+                    ui.selectable_value(fit_method, FitMethod::LBfgsB, "L-Bfgs-B");
+                    ui.selectable_value(fit_method, FitMethod::TNC, "TNC");
+                    ui.selectable_value(fit_method, FitMethod::SLSQP, "SLSQP");
+                }
+            );
+            
+        });
+    }
+
+    fn make_text_status(optresult: Result<(nlopt::SuccessState, f64), (nlopt::FailState, f64)>)->String {
+        match optresult {
+            Ok((okstate, val)) => {
+                use nlopt::SuccessState::{FtolReached, MaxEvalReached, MaxTimeReached, StopValReached, Success, XtolReached};
+                match okstate {
+                    Success | FtolReached | StopValReached | XtolReached => {format!("Fitting finished: {val}")}
+                    MaxEvalReached => {"Max evaluations reached".into()}
+                    MaxTimeReached => {"Max time reached".into()}
+                }
+            }
+            Err((failstate, _)) => {
+                use nlopt::FailState::{Failure, ForcedStop, InvalidArgs, OutOfMemory, RoundoffLimited};
+                match failstate {
+                    Failure => {"Fitting failure".into()}
+                    InvalidArgs => {"The parameter values exceed the bounds".into()}
+                    OutOfMemory => {"Memory error".into()}
+                    RoundoffLimited => {"Roundoff limited".into()}
+                    ForcedStop => {"Forced stop of fitting".into()}
+                }
+            }
+        }
+    }
+
+    fn param_box(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let Self {
+            models,
+            current_circ,
+            current_dataset,
+            str_params,
+            text_status,
+        ..} = self;
+
+        if egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.vertical(|ui|->bool {
+                use egui::Widget;
+
+                let mut lock_now = false;
+
+                let mut empty_ed = vec![];
+
+                let param_names = models.get_mut(*current_circ).map_or(vec![], |x| x.circuit.param_names());
+                let paramlist = &mut str_params[*current_circ][*current_dataset];
+                let param_ed = models.get_mut(*current_circ).map_or(&mut empty_ed, |x| &mut x.parameters);
+
+                let wi = ui.available_width() - 155.0;  // Magic numbers
+
+                for (((name, val), (min, max)), ed) in 
+                        param_names.iter()
+                        .zip(&mut paramlist.vals)
+                        .zip(&mut paramlist.bounds)
+                        .zip(param_ed)
+                {
+                    ui.horizontal(|ui| {
+                        if ui.selectable_label(true, match ed {
+                            ParameterEditability::Plural => "✔",
+                            ParameterEditability::Single => "1",
+                            ParameterEditability::Immutable => "x",
+                        })
+                        .on_hover_ui(|ui| {ui.label("Feature not yet implemented");})
+                        .clicked() {
+                            *ed = match ed {
+                                ParameterEditability::Plural => ParameterEditability::Single,
+                                ParameterEditability::Single => ParameterEditability::Immutable,
+                                ParameterEditability::Immutable => ParameterEditability::Plural,
+                            };
+                        }
+
+                        ui.label(name);
+
+                        let mut x_txt = |s: &mut String, div, hint| {
+                            let t_clr = |s:&str| if s.parse::<f64>().is_ok() {None} else {Some(Color32::RED)};
+                            let mclr = t_clr(s);
+                            if egui::TextEdit::singleline(s)
+                                .text_color_opt(mclr)
+                                .desired_width(wi/div)
+                                .ui(ui)
+                                .on_hover_ui(|ui| {ui.label(hint);})
+                                .changed()
+                            {
+                                lock_now = true;
+                            }
+                        };
+
+                        x_txt(min, 4., "Min");
+                        x_txt(max, 4., "Max");
+                        x_txt(val, 2., "Value");
+
+                        if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
+                            if let Ok(mut nval) = val.parse::<f64>() {
+                                if ctx.input().modifiers.shift  { nval /= 1.01 }
+                                else if ctx.input().modifiers.command { nval /= 2.0 }
+                                else { nval /= 1.1 }
+                                *val = format!("{}", PrettyPrintFloat(nval));
+                            }
+                            text_status.clear();
+                            lock_now = true;
+                        }
+                        if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
+                            if let Ok(mut nval) = val.parse::<f64>() {
+                                if ctx.input().modifiers.shift  { nval *= 1.01 }
+                                else if ctx.input().modifiers.command { nval *= 2.0 }
+                                else { nval *= 1.1 }
+                                *val = format!("{}", PrettyPrintFloat(nval));
+                            }
+                            text_status.clear();
+                            lock_now = true;
+                        }
+                    });
+                }
+
+                if !text_status.is_empty() {
+                    ui.separator();
+                    ui.label(&*text_status);
+                }
+
+                lock_now
+            }).inner
+        }).inner {
+            models[*current_circ].lock = true;
+        }
+    }
+
+
+    fn params_edit_panel(&mut self, ctx: &egui::Context) {
 
         egui::SidePanel::left("datalist").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("Save project as").clicked() {
-                    try_into_numbers(str_params).map_or_else(|| {
-                        *text_status = "Can't save due to errors in parameters".into();
-                    }, |nparams| if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
-                            if let Ok(mut file) = std::fs::File::create(filename) {
-                                if let Ok(string) = Self::save_to_string(models, datasets, &nparams) {
-                                    use std::io::Write;
-                                    writeln!(&mut file, "{}", string).unwrap();
-                                } else {
-                                    println!("Error writing to the file");
-                                }
-                            }
-                        });
-                }
 
-                if ui.button("Load project").clicked() {
-                    if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_open_single_file() {
-                        if let Ok(sfile) = std::fs::read_to_string(filename) {
-                            if let Some((m, d, p)) = Self::load_from_string(&sfile) {
-                                *models = m;
-                                *datasets = d;
-                                *str_params = p.into_iter().map(|ds| ds.into_iter().map(Into::into).collect()).collect();
-                                *current_circ = 0;
-                                *current_dataset = 0;
-                                *opening_data = vec![];
-                                *copied_paramlist = None;
-                            }
-                        }
-                    }                        
-                }
-            });
+            self.project_files(ui);
 
             ui.separator();
 
-            if ui.horizontal_wrapped(|ui| {
-                let mut lock_now = false;
+            self.fitting_box(ui);
 
-                if ui.button("Fit").clicked() {
-                    if let Ok(mut paramlist) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
-                        //let paramlist = &mut params[*current_circ][*current_dataset];
-                        let mut opt = nlopt::Nlopt::new(
-                            match fit_method {
-                                FitMethod::BOBYQA => nlopt::Algorithm::Bobyqa,
-                                FitMethod::TNC => nlopt::Algorithm::TNewton,
-                                FitMethod::SLSQP => nlopt::Algorithm::Slsqp,
-                                FitMethod::LBfgsB => nlopt::Algorithm::Lbfgs,
-                            }, 
-                            paramlist.vals.len(), 
-                            |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
-                                let circ = &models[*current_circ].circuit;
-                                if let Some(gout) = &mut gradient_out {
-                                    for i in 0..gout.len() {
-                                        gout[i] = 0.0;
-                                    }
-                                };
-                                let exps = &datasets[*current_dataset].0;
-    
-                                let mut loss = 0.0_f64;
-                                for point in exps {
-                                    let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
-                                    let diff = model_imp - point.imp;
-                                    loss += diff.norm_sqr() / point.imp.norm_sqr();
-    
-                                    if let Some(gout) = &mut gradient_out {
-                                        for i in 0..gout.len() {
-                                            let dmdx = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
-                                            // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
-                                            let ml = (point.imp-model_imp)*dmdx.conj().re * 2.0;
-                                            gout[i] += -1.0 / point.imp.norm_sqr() * ml.re;
-                                        }
-                                    };
-                                }
-                            
-                                loss
-                            },
-                            nlopt::Target::Minimize,
-                            (),
-                        );
-    
-                        opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
-                        opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
-                        opt.set_maxeval(u32::MAX).unwrap();
-                        opt.set_maxtime(10.0).unwrap();
-    
-                        opt.set_xtol_rel(1e-10).unwrap();
-    
-                        let optresult = opt.optimize(&mut paramlist.vals);
-    
-                        *text_status = match optresult {
-                            Ok((okstate, val)) => {
-                                use nlopt::SuccessState::{FtolReached, MaxEvalReached, MaxTimeReached, StopValReached, Success, XtolReached};
-                                let res_str = match okstate {
-                                    Success | FtolReached | StopValReached | XtolReached => {format!("Fitting finished: {}", val)}
-                                    MaxEvalReached => {"Max evaluations reached".into()}
-                                    MaxTimeReached => {"Max time reached".into()}
-                                };
+            let Self {
+                models,
+                current_circ,
+                current_dataset,
+                str_params,
+                copied_paramlist,
+            ..} = self;
 
-                                str_params[*current_circ][*current_dataset] = paramlist.into();
-
-                                res_str
-                            }
-                            Err((failstate, _)) => {
-                                use nlopt::FailState::{Failure, ForcedStop, InvalidArgs, OutOfMemory, RoundoffLimited};
-                                match failstate {
-                                    Failure => {"Fitting failure".into()}
-                                    InvalidArgs => {"The parameter values exceed the bounds".into()}
-                                    OutOfMemory => {"Memory error".into()}
-                                    RoundoffLimited => {"Roundoff limited".into()}
-                                    ForcedStop => {"Forced stop of fitting".into()}
-                                }
-                            }
-                        };
-                        println!("{:?}", optresult);
-    
-                        lock_now = true;
-                    }
-                }
-
-                if ui.button("Fit log").clicked() {
-                    if let Ok(mut paramlist) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
-                        //let paramlist = &mut params[*current_circ][*current_dataset];
-                        let mut opt = nlopt::Nlopt::new(
-                            match fit_method {
-                                FitMethod::BOBYQA => nlopt::Algorithm::Bobyqa,
-                                FitMethod::TNC => nlopt::Algorithm::TNewton,
-                                FitMethod::SLSQP => nlopt::Algorithm::Slsqp,
-                                FitMethod::LBfgsB => nlopt::Algorithm::Lbfgs,
-                            }, 
-                            paramlist.vals.len(), 
-                            |params: &[f64], mut gradient_out: Option<&mut [f64]>, _: &mut ()| {
-                                let circ = &models[*current_circ].circuit;
-                                if let Some(gout) = &mut gradient_out {
-                                    for i in 0..gout.len() {
-                                        gout[i] = 0.0;
-                                    }
-                                };
-                                let exps = &datasets[*current_dataset].0;
-    
-                                let mut loss = 0.0_f64;
-                                for point in exps {
-                                    let model_imp = circ.impedance(std::f64::consts::TAU*point.freq, params);
-                                    //let diff = ;
-                                    loss += (model_imp/point.imp).ln().norm_sqr();
-    
-                                    if let Some(gout) = &mut gradient_out {
-                                        for i in 0..gout.len() {
-                                            let dzdparam = circ._d_impedance(std::f64::consts::TAU*point.freq, params, i);
-
-                                            let dzdparam1z = 1.0/model_imp * dzdparam;
-                                            let lnzz = (model_imp/point.imp).ln();
-                                            let d = dzdparam1z * lnzz.conj() + lnzz * dzdparam1z.conj();
-
-                                            // (a*)b + a(b*)  = [(a*)b] + [(a*)b]* = 2*re[(a*)b]
-
-                                            gout[i] += d.re;
-                                        }
-                                    };
-                                }
-                            
-                                loss
-                            },
-                            nlopt::Target::Minimize,
-                            (),
-                        );
-    
-                        opt.set_lower_bounds(&paramlist.bounds.iter().map(|x| x.0).collect::<Vec<f64>>()).unwrap();
-                        opt.set_upper_bounds(&paramlist.bounds.iter().map(|x| x.1).collect::<Vec<f64>>()).unwrap();
-                        opt.set_maxeval(u32::MAX).unwrap();
-                        opt.set_maxtime(10.0).unwrap();
-    
-                        opt.set_xtol_rel(1e-10).unwrap();
-    
-                        let optresult = opt.optimize(&mut paramlist.vals);
-    
-                        *text_status = match optresult {
-                            Ok((okstate, val)) => {
-                                use nlopt::SuccessState::{FtolReached, MaxEvalReached, MaxTimeReached, StopValReached, Success, XtolReached};
-                                let res_str = match okstate {
-                                    Success | FtolReached | StopValReached | XtolReached => {format!("Fitting finished: {}", val)}
-                                    MaxEvalReached => {"Max evaluations reached".into()}
-                                    MaxTimeReached => {"Max time reached".into()}
-                                };
-
-                                str_params[*current_circ][*current_dataset] = paramlist.into();
-
-                                res_str
-                            }
-                            Err((failstate, _)) => {
-                                use nlopt::FailState::{Failure, ForcedStop, InvalidArgs, OutOfMemory, RoundoffLimited};
-                                match failstate {
-                                    Failure => {"Fitting failure".into()}
-                                    InvalidArgs => {"The parameter values exceed the bounds".into()}
-                                    OutOfMemory => {"Memory error".into()}
-                                    RoundoffLimited => {"Roundoff limited".into()}
-                                    ForcedStop => {"Forced stop of fitting".into()}
-                                }
-                            }
-                        };
-                        println!("{:?}", optresult);
-    
-                        lock_now = true;
-                    }
-                }
-
-                egui::ComboBox::from_id_source("Select_method")
-                    .selected_text(&format!("{:?}", fit_method))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(fit_method, FitMethod::BOBYQA, "Bobyqa");
-                        ui.selectable_value(fit_method, FitMethod::LBfgsB, "L-Bfgs-B");
-                        ui.selectable_value(fit_method, FitMethod::TNC, "TNC");
-                        ui.selectable_value(fit_method, FitMethod::SLSQP, "SLSQP");
-                    }
-                );
-
-                lock_now
-            }).inner {
-                models[*current_circ].lock = true;
-            }
-
-            if ui.horizontal_wrapped(|ui| {
+            let copypaste_box = ui.horizontal_wrapped(|ui| {
                 let mut lock_now = false;
 
                 if ui.button("Copy").on_hover_ui(|ui| {ui.label("Copy the parameters from the current circuit");}).clicked() {
@@ -957,218 +1064,167 @@ impl eframe::App for TemplateApp {
                     lock_now = true;
                 }
                 lock_now
-            }).inner {
+            });
+            if copypaste_box.inner {
                 models[*current_circ].lock = true;
             }
 
-            if egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.vertical(|ui|->bool {
-                    use egui::Widget;
+            self.param_box(ui, ctx);
 
-                    let mut lock_now = false;
+        });
+    }
 
-                    let mut empty_ed = vec![];
-
-                    let param_names = models.get_mut(*current_circ).map_or(vec![], |x| x.circuit.param_names());
-                    let paramlist = &mut str_params[*current_circ][*current_dataset];
-                    let param_ed = models.get_mut(*current_circ).map_or(&mut empty_ed, |x| &mut x.parameters);
-
-                    let wi = ui.available_width() - 155.0;  // Magic numbers
-
-                    for (((name, val), (min, max)), ed) in 
-                            param_names.iter()
-                            .zip(&mut paramlist.vals)
-                            .zip(&mut paramlist.bounds)
-                            .zip(param_ed)
-                    {
-                        ui.horizontal(|ui| {
-                            if ui.selectable_label(true, match ed {
-                                ParameterEditability::Plural => "✔",
-                                ParameterEditability::Single => "1",
-                                ParameterEditability::Immutable => "x",
-                            })
-                            .on_hover_ui(|ui| {ui.label("Feature not yet implemented");})
-                            .clicked() {
-                                *ed = match ed {
-                                    ParameterEditability::Plural => ParameterEditability::Single,
-                                    ParameterEditability::Single => ParameterEditability::Immutable,
-                                    ParameterEditability::Immutable => ParameterEditability::Plural,
-                                };
-                            }
-
-                            ui.label(name);
-
-                            let mut x_txt = |s: &mut String, div, hint| {
-                                let t_clr = |s:&str| if s.parse::<f64>().is_ok() {None} else {Some(Color32::RED)};
-                                let mclr = t_clr(s);
-                                if egui::TextEdit::singleline(s)
-                                    .text_color_opt(mclr)
-                                    .desired_width(wi/div)
-                                    .ui(ui)
-                                    .on_hover_ui(|ui| {ui.label(hint);})
-                                    .changed()
-                                {
-                                    lock_now = true;
-                                }
-                            };
-
-                            x_txt(min, 4., "Min");
-                            x_txt(max, 4., "Max");
-                            x_txt(val, 2., "Value");
-
-                            if ui.small_button("<").on_hover_ui(|ui| {ui.label("Decrease (Ctrl=fast, Shift=slow)");}).clicked() {
-                                if let Ok(mut nval) = val.parse::<f64>() {
-                                    if ctx.input().modifiers.shift  { nval /= 1.01 }
-                                    else if ctx.input().modifiers.command { nval /= 2.0 }
-                                    else { nval /= 1.1 }
-                                    *val = format!("{}", PrettyPrintFloat(nval));
-                                }
-                                text_status.clear();
-                                lock_now = true;
-                            }
-                            if ui.small_button(">").on_hover_ui(|ui| {ui.label("Increase (Ctrl=fast, Shift=slow)");}).clicked() {
-                                if let Ok(mut nval) = val.parse::<f64>() {
-                                    if ctx.input().modifiers.shift  { nval *= 1.01 }
-                                    else if ctx.input().modifiers.command { nval *= 2.0 }
-                                    else { nval *= 1.1 }
-                                    *val = format!("{}", PrettyPrintFloat(nval));
-                                }
-                                text_status.clear();
-                                lock_now = true;
-                            }
-                        });
-                    }
-
-                    if !text_status.is_empty() {
-                        ui.separator();
-                        ui.label(&*text_status);
-                    }
-
-                    lock_now
-                }).inner
-            }).inner {
-                models[*current_circ].lock = true;
+    fn plot_type_control(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui|
+            if ui.small_button("Nyquist").clicked() {
+                self.plot_type = PlotType::Nyquist;
             }
+            else if ui.small_button("Bode Amplitude").clicked() {
+                self.plot_type = PlotType::BodeAmp;
+            }
+            else if ui.small_button("Bode Phase").clicked() {
+                self.plot_type = PlotType::BodePhase;
+            }
+            else if ui.small_button("AdmGodog").clicked() {
+                self.plot_type = PlotType::AdmGodog;
+            }
+        );
+    }
+
+    fn plot_box(&mut self, ui: &mut egui::Ui) {
+        self.plot_type_control(ui);
+
+        let Self {
+            models,
+            current_circ,
+            current_dataset,
+            datasets,
+            str_params,
+            plot_type,
+        ..} = self;
+
+        let dataset = &mut match datasets.get_mut(*current_dataset) {
+            Some(s) => s,
+            None => return,
+        }.0;
+
+        let eplot_type = *plot_type;
+
+        let points_dataset = egui::plot::Points::new(
+                egui::plot::Values::from_values(
+                    dataset.iter().map(|d| 
+                        match eplot_type {
+                            PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
+                            PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg().to_degrees()),
+                            PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
+                            PlotType::AdmGodog => egui::plot::Value::new((1.0/d.imp).re, (1.0/d.imp).im),
+                        }
+                    ).collect::<Vec<_>>() 
+                )
+            )
+            .shape(egui::plot::MarkerShape::Circle)
+            .radius(4.);
+        
+        let dlen = dataset.len();
+
+        let rmin;
+        let rmax;
+
+        match dlen {
+            0 => {
+                rmin = 1.0;
+                rmax = 1000.0;
+            }
+            1 => {
+                rmin = dataset[0].freq/2.0;
+                rmax = dataset[0].freq*2.0;
+            }
+            _ => {
+                rmin = dataset[0].freq;
+                rmax = dataset[dlen-1].freq;
+            }
+        }
+
+        let plt = egui::plot::Plot::new("plot1")
+            .width(ui.available_width())
+            .height(ui.available_height()/2.0)
+            .label_formatter(move |_s, &Value{x, y}| -> String {
+                match eplot_type {
+                    PlotType::Nyquist => format!("{x} Ohm\n{y} Ohm"),
+                    PlotType::BodeAmp => format!("{} Hz:\n{} Ohm", 10.0_f64.powf(x), y),
+                    PlotType::BodePhase => format!("{} Hz:\n{}°", 10.0_f64.powf(x), y),
+                    PlotType::AdmGodog => format!("{x} Mho\n{y} Mho"),
+                }
+            })
+            .x_axis_formatter(move |v,_e| {
+                match eplot_type {
+                    PlotType::Nyquist|PlotType::AdmGodog => v.to_string(),
+                    PlotType::BodePhase|PlotType::BodeAmp => (10.0_f64).powf(v).to_string(),
+                }
+            });
+
+        plt.show(ui, |plot_ui| {
+            plot_ui.points(points_dataset);
+
+            if let Ok(cparams) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
+                if let Some(m) = models.get(*current_circ) {
+                    let line_values: Vec<egui::widgets::plot::Value> = geomspace(rmin, rmax, 1000).map(
+                        |f| {
+                        let imp = m.circuit.impedance(std::f64::consts::TAU*f, &cparams.vals);
+                        match plot_type {
+                            PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                            PlotType::AdmGodog => egui::plot::Value::new((1.0/imp).re, (1.0/imp).im),
+                            PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg().to_degrees()),
+                            PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
+                        }
+                    }).collect();
+                    plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values)).stroke((0.5, Color32::WHITE)));
+
+                    let data_values = 
+                    dataset.iter().map(|d| {
+                        let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &cparams.vals);
+                        match plot_type {
+                            PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
+                            PlotType::AdmGodog => egui::plot::Value::new((1.0/imp).re, (1.0/imp).im),
+                            PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg().to_degrees()),
+                            PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
+                        }
+                    }).collect();
+                    plot_ui.points(egui::plot::Points::new(egui::plot::Values::from_values(data_values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.));
+                }
+            }
+
         });
 
+        ui.label(match plot_type{
+            PlotType::AdmGodog => "Im Y vs Re Y",
+            PlotType::Nyquist => "-Im Z vs Re Z",
+            PlotType::BodeAmp => "|Z| vs freq",
+            PlotType::BodePhase => "arg Z vs freq",
+        });
+
+    }
+
+    fn plot_panel(&mut self, ctx: &egui::Context) {
+
+
         egui::CentralPanel::default().show(ctx, |ui| {
+
             ui.vertical_centered_justified(|ui| {
                 use eframe::egui::Widget;
+
+                self.plot_box(ui);
+                
+                let Self {
+                    current_dataset,
+                    datasets,
+                    editor,
+                ..} = self;
 
                 let dataset = &mut match datasets.get_mut(*current_dataset) {
                     Some(s) => s,
                     None => return,
                 }.0;
-
-                ui.horizontal(|ui|
-                    if ui.small_button("Nyquist").clicked() {
-                        *plot_type = PlotType::Nyquist;
-                    }
-                    else if ui.small_button("Bode Amplitude").clicked() {
-                        *plot_type = PlotType::BodeAmp;
-                    }
-                    else if ui.small_button("Bode Phase").clicked() {
-                        *plot_type = PlotType::BodePhase;
-                    }
-                    else if ui.small_button("AdmGodog").clicked() {
-                        *plot_type = PlotType::AdmGodog;
-                    }
-                );
-
-                let eplot_type = *plot_type;
-
-                let points_dataset = egui::plot::Points::new(
-                        egui::plot::Values::from_values(
-                            dataset.iter().map(|d| 
-                                match eplot_type {
-                                    PlotType::Nyquist => egui::plot::Value::new(d.imp.re, -d.imp.im),
-                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -d.imp.arg().to_degrees()),
-                                    PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), d.imp.norm()),
-                                    PlotType::AdmGodog => egui::plot::Value::new((1.0/d.imp).re, (1.0/d.imp).im),
-                                }
-                            ).collect::<Vec<_>>() 
-                        )
-                    )
-                    .shape(egui::plot::MarkerShape::Circle)
-                    .radius(4.);
-                
-                let dlen = dataset.len();
-
-                let rmin;
-                let rmax;
-
-                match dlen {
-                    0 => {
-                        rmin = 1.0;
-                        rmax = 1000.0;
-                    }
-                    1 => {
-                        rmin = dataset[0].freq/2.0;
-                        rmax = dataset[0].freq*2.0;
-                    }
-                    _ => {
-                        rmin = dataset[0].freq;
-                        rmax = dataset[dlen-1].freq;
-                    }
-                }
-
-                let plt = egui::plot::Plot::new("plot1")
-                    .width(ui.available_width())
-                    .height(ui.available_height()/2.0)
-                    .label_formatter(move |_s, &Value{x, y}| -> String {
-                        match eplot_type {
-                            PlotType::Nyquist => format!("{} Ohm\n{} Ohm", x, y),
-                            PlotType::BodeAmp => format!("{} Hz:\n{} Ohm", 10.0_f64.powf(x), y),
-                            PlotType::BodePhase => format!("{} Hz:\n{}°", 10.0_f64.powf(x), y),
-                            PlotType::AdmGodog => format!("{} Mho\n{} Mho", x, y),
-                        }
-                    })
-                    .x_axis_formatter(move |v,_e| {
-                        match eplot_type {
-                            PlotType::Nyquist|PlotType::AdmGodog => v.to_string(),
-                            PlotType::BodePhase|PlotType::BodeAmp => (10.0_f64).powf(v).to_string(),
-                        }
-                    });
-
-                plt.show(ui, |plot_ui| {
-                    plot_ui.points(points_dataset);
-
-                    if let Ok(cparams) = ParameterDesc::try_from(&str_params[*current_circ][*current_dataset]) {
-                        if let Some(m) = models.get(*current_circ) {
-                            let line_values: Vec<egui::widgets::plot::Value> = geomspace(rmin, rmax, 1000).map(
-                                |f| {
-                                let imp = m.circuit.impedance(std::f64::consts::TAU*f, &cparams.vals);
-                                match plot_type {
-                                    PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                                    PlotType::AdmGodog => egui::plot::Value::new((1.0/imp).re, (1.0/imp).im),
-                                    PlotType::BodePhase => egui::plot::Value::new(f.log10(), -imp.arg().to_degrees()),
-                                    PlotType::BodeAmp => egui::plot::Value::new(f.log10(), imp.norm()),
-                                }
-                            }).collect();
-                            plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(line_values)).stroke((0.5, Color32::WHITE)));
-    
-                            let data_values = 
-                            dataset.iter().map(|d| {
-                                let imp = m.circuit.impedance(std::f64::consts::TAU*d.freq, &cparams.vals);
-                                match plot_type {
-                                    PlotType::Nyquist => egui::plot::Value::new(imp.re, -imp.im),
-                                    PlotType::AdmGodog => egui::plot::Value::new((1.0/imp).re, (1.0/imp).im),
-                                    PlotType::BodePhase => egui::plot::Value::new(d.freq.log10(), -imp.arg().to_degrees()),
-                                    PlotType::BodeAmp => egui::plot::Value::new(d.freq.log10(), imp.norm()),
-                                }
-                            }).collect();
-                            plot_ui.points(egui::plot::Points::new(egui::plot::Values::from_values(data_values)).color(Color32::WHITE).shape(egui::plot::MarkerShape::Circle).radius(2.));
-                        }
-                    }
-
-                });
-
-                ui.label(match plot_type{
-                    PlotType::AdmGodog => "Im Y vs Re Y",
-                    PlotType::Nyquist => "-Im Z vs Re Z",
-                    PlotType::BodeAmp => "|Z| vs freq",
-                    PlotType::BodePhase => "arg Z vs freq",
-                });
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let edit = egui::TextEdit::multiline(editor)
@@ -1182,6 +1238,25 @@ impl eframe::App for TemplateApp {
                 });
             });
         });
+
+    }
+}
+
+impl eframe::App for TemplateApp {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        ctx.set_visuals(egui::Visuals::dark());
+
+        if !self.opening_data.is_empty() {
+            display_import_window(ctx, &mut self.opening_mode, &mut self.opening_data, &mut self.datasets, &mut self.str_params);
+        }
+
+        self.left_panel(ctx, frame);
+
+        self.dataset_panel(ctx);
+
+        self.params_edit_panel(ctx);
+
+        self.plot_panel(ctx);
     }
 
     fn warm_up_enabled(&self) -> bool {
@@ -1205,7 +1280,10 @@ impl eframe::App for TemplateApp {
 
 fn main() {
     let app = TemplateApp::default();
-    let native_options = eframe::NativeOptions{initial_window_size: Some(vec2(1100., 600.)), ..eframe::NativeOptions::default()};
+    let native_options = eframe::NativeOptions{
+        initial_window_size: Some(vec2(1100., 600.)),
+        ..eframe::NativeOptions::default()
+    };
     eframe::run_native("Impediment", native_options, Box::new(|_| Box::new(app)));
 }
 
