@@ -7,6 +7,7 @@ use crate::{Cplx, ParameterDesc, StringParameterDesc, ParameterEditability};
 
 const I: Cplx = Cplx{ re: 0.0, im: 1.0 };
 
+// Types of elements used in equivalent circuit
 #[derive(Clone, Copy, Debug)]
 pub enum Element {
     Resistor,
@@ -19,6 +20,7 @@ use Element::{Capacitor, Inductor, Resistor, Warburg, Cpe};
 
 
 impl Element {
+    // set the parameter list attached to the element and return the previous ones
     fn exchange_param<'a>(self, element: Self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
             match self {
@@ -50,6 +52,8 @@ impl Element {
             }
         }
     }
+
+    // Remove parameters when this element is replaced from the circuit
     fn remove_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
                 match self {
@@ -65,6 +69,8 @@ impl Element {
             }
         };
     }
+
+    // Add parameters when this element is placed to the circuit
     fn insert_param<'a>(self, idx: usize, paramlist: impl Iterator<Item = &'a mut StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         for pdesc in paramlist {
             // @Refactor: Duplicate
@@ -89,6 +95,7 @@ impl Element {
     }
 }
 
+// An equivalent circuit
 #[derive(Clone, Debug)]
 pub enum Circuit {
     Element(Element),
@@ -96,7 +103,8 @@ pub enum Circuit {
     Parallel(Vec<Circuit>),
 }
 
-
+// Helper function: get subcircuit index and the x coordinate of the subcircuit
+// for series circuit
 fn series_index_by_block(series: &[Circuit], block: (u16, u16)) -> Option<(usize, u16)> {
     let mut start_x = 0_u16;
     for (i, el) in &mut series.iter().enumerate() {
@@ -112,6 +120,7 @@ fn series_index_by_block(series: &[Circuit], block: (u16, u16)) -> Option<(usize
     None
 }
 
+// Helper function: calculate the painted area size for Parallel circuit
 fn parallel_painted_size(elems: &[Circuit]) -> (u16, u16) {
     let s = elems.iter()
                  .map(Circuit::painted_size)
@@ -119,14 +128,15 @@ fn parallel_painted_size(elems: &[Circuit]) -> (u16, u16) {
     (s.0 + 2, s.1)
 }
 
-
+// What is picked inside Parallel circuit when it's clicked?
 enum ParallelBlockPicked {
     Child(usize, u16, u16),
     This,
     None
 }
 
-
+// Helper function: get subcircuit index and the x coordinate of the subcircuit
+// for parallel circuit
 fn parallel_index_by_block(parallel: &[Circuit], block: (u16, u16)) -> ParallelBlockPicked {
         let wsize = parallel_painted_size(parallel);
         if block.1 < wsize.1 && (block.0 == 0 || block.0 == wsize.0-1) {
@@ -153,13 +163,19 @@ fn parallel_index_by_block(parallel: &[Circuit], block: (u16, u16)) -> ParallelB
 }
 
 
-/// Paint a sign under the element
+/// Paint a text label under the element
 fn sign_element(ctx: &eframe::egui::Painter, text: &str, pos: Pos2, blocksize: f32, color: Color32) {
-    ctx.text(pos+vec2(blocksize, blocksize*3./2.), eframe::egui::Align2::CENTER_CENTER, text, eframe::egui::FontId{size: 12.0, family: eframe::egui::FontFamily::Proportional}, color);
+    ctx.text(
+        pos+vec2(blocksize, blocksize*3./2.),
+        eframe::egui::Align2::CENTER_CENTER,
+        text,
+        eframe::egui::FontId{size: 12.0, family: eframe::egui::FontFamily::Proportional},
+        color);
 }
 
 
 impl Circuit {
+    // Create a new param list for the circuit
     pub fn generate_new_params(&self) -> ParameterDesc {
         match self {
             Self::Element(element) => {
@@ -185,10 +201,12 @@ impl Circuit {
         }
     }
 
+    // Generate and list all the parameter names
     pub fn param_names(&self) -> Vec<String> {
         self.param_names_rec(0).0
     }
 
+    // Recursive helper: generate all the parameter names
     pub fn param_names_rec(&self, mut start_index: usize) -> (Vec<String>, usize) {
         match self {
             Self::Element(Element::Resistor) => (vec![format!("R{start_index}")], start_index+1),
@@ -208,6 +226,8 @@ impl Circuit {
         }
     }
 
+    // Rectangular area size needed for the circuit in blocks
+    // (one element = 2*1 block)
     pub fn painted_size(&self) -> (u16, u16) {
         match self {
             Self::Element(_) => (2,2),
@@ -226,6 +246,7 @@ impl Circuit {
         }
     }
 
+    // Draw the circuit starting from "start_index" element
     pub fn paint(&self, pos: eframe::egui::Pos2, blocksize: f32, painter: &eframe::egui::Painter, start_index: usize, color: Color32)->usize {
         let stroke = Stroke::new(1., color);
         match self {
@@ -340,6 +361,7 @@ impl Circuit {
         }
     }
 
+    // Amount of parameters of the circuit
     pub fn paramlen(&self) -> usize {
         match self {
             Self::Element(Resistor|Capacitor|Inductor|Warburg) => 1,
@@ -395,11 +417,13 @@ impl Circuit {
         }
     }
 
+    // Calculate the impedance at a given angular frequency
     pub fn impedance(&self, omega: f64, params: &[f64]) -> Cplx {
         assert!(params.len() == self.paramlen());
         self._impedance(omega, params)
     }
 
+    // Calculate the impedance derivative of parameter no. dparam at a given angular frequency
     pub fn _d_impedance(&self, omega: f64, params: &[f64], dparam: usize) -> Cplx {
         if dparam >= self.paramlen() {
             //panic!("Gradient requested for {} parameter of {}", dparam, self)
@@ -496,10 +520,12 @@ impl Circuit {
         }
     }
  
+    // Circuit editing: replace the clicked element with a new one
     pub fn replace(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, editability: &mut Vec<ParameterEditability>) {
         self._replace(coord, element, paramlist, 0, editability);
     }
 
+    // Circuit editing: add the element in series to the clicked one
     pub fn _add_series(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
         match self {
             Self::Element(e) => {
@@ -536,6 +562,7 @@ impl Circuit {
         }
     }
 
+    // Circuit editing: add the element parallel to the clicked one
     pub fn _add_parallel(&mut self, coord: (u16, u16), element: Element, paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>){
         match self {
             Self::Element(e) => {
@@ -573,6 +600,7 @@ impl Circuit {
     }
 
 
+    // Circuit editing: remove the clicked element
     pub fn _remove(&mut self, coord: (u16, u16), paramlist: std::slice::IterMut<'_, StringParameterDesc>, param_idx: usize, editability: &mut Vec<ParameterEditability>) {
         match self {
             Self::Element(_) => {},

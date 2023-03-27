@@ -1,3 +1,6 @@
+// The main project file contains mostly the GUI code
+
+
 #![warn(clippy::nursery)]
 #![warn(clippy::pedantic)]
 
@@ -5,22 +8,18 @@ use float_pretty_print::PrettyPrintFloat;
 
 use std::{fmt::Display, str::FromStr};
 
+mod circuit;
+mod file;
+mod data;
+
 use circuit::Circuit;
 use eframe::egui::{self, Color32, Vec2, vec2, plot::Value};
 
-
-#[derive(Debug, Copy, Clone)]
-pub struct DataPiece {
-    pub freq: f64,
-    pub imp: crate::Cplx,
-}
-
 use crate::circuit::Element;
 
-mod circuit;
-mod file;
+use data::{Cplx, DataPiece, Model, ParameterDesc, StringParameterDesc, try_paramdesc_into_numbers};
 
-pub type Cplx = num::complex::Complex<f64>;
+// The simple types to represent GUI selectors
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum FitMethod { BOBYQA, TNC, SLSQP, LBfgsB }
@@ -43,84 +42,7 @@ pub enum ElectricComponent { R, C, W, L, Q }
 pub enum ComponentInteraction { Change, Series, Parallel, Delete }
 
 #[derive(Debug, Clone)]
-pub struct ParameterDesc {
-    pub vals : Vec<f64>,
-    pub bounds : Vec<(f64, f64)>
-}
-
-#[derive(Debug, Clone)]
-pub struct StringParameterDesc {
-    pub vals : Vec<String>,
-    pub bounds : Vec<(String, String)>
-}
-
-impl From<ParameterDesc> for StringParameterDesc {
-    fn from(v: ParameterDesc) -> Self {
-        Self {
-            vals: v.vals.into_iter().map(|x| format!("{}", PrettyPrintFloat(x))).collect(),
-            bounds: v.bounds.into_iter().map(|(a,b)| (format!("{}", PrettyPrintFloat(a)), format!("{}", PrettyPrintFloat(b)))).collect(), 
-        }
-    }
-}
-
-impl TryFrom<&StringParameterDesc> for ParameterDesc {
-    type Error = ();
-    fn try_from(v: &StringParameterDesc) -> Result<Self, ()> {
-        Ok(
-            Self {
-                vals: v.vals.iter().map(|x| x.parse::<f64>().ok()).collect::<Option<Vec<f64>>>().ok_or(())?,
-                bounds: v.bounds.iter().map(|(a,b)| {
-                    let (a,b) = (a.parse::<f64>().ok(), b.parse::<f64>().ok());
-                    if let (Some(a), Some(b)) = (a, b) {
-                        return Some((a,b))
-                    }
-                    None
-                }).collect::<Option<Vec<(f64, f64)>>>().ok_or(())?, 
-            }
-        )
-    }
-}
-
-
-fn try_into_numbers(x: &[Vec<StringParameterDesc>]) -> Option<Vec<Vec<ParameterDesc>>> {
-    x.iter().map(|ds| {
-        ds.iter().map(|r|->Option<ParameterDesc> {
-            r.try_into().ok()
-        }).collect::< Option<Vec<_>> >()
-    }).collect::< Option<Vec<_>> >()
-}
-
-
-impl ParameterDesc {
-    pub fn insert(&mut self, index: usize, (val, bounds): (f64, (f64, f64))) {
-        self.vals.insert(index, val);
-        self.bounds.insert(index, bounds);
-    }
-    pub fn remove(&mut self, index: usize) -> (f64, (f64, f64)) {
-        (self.vals.remove(index), self.bounds.remove(index))
-    }
-}
-
-impl StringParameterDesc {
-    pub fn insert(&mut self, index: usize, (val, bounds): (f64, (f64, f64))) {
-        self.vals.insert(index, format!("{}", PrettyPrintFloat(val)));
-        self.bounds.insert(index, (format!("{}", PrettyPrintFloat(bounds.0)), format!("{}", PrettyPrintFloat(bounds.1))));
-    }
-    pub fn remove(&mut self, index: usize) -> (String, (String, String)) {
-        (self.vals.remove(index), self.bounds.remove(index))
-    }
-}
-
-#[derive(Debug, Clone)]
 pub enum ParameterEditability { Plural, Single, Immutable }
-
-#[derive(Debug, Clone)]
-pub struct Model {
-    circuit: Circuit,
-    name: String,
-    parameters: Vec<ParameterEditability>,
-    lock: bool,
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FreqOpenParam {Hz, Khz, Rads, Krads}
@@ -142,7 +64,9 @@ impl Display for ImpOpenParam {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PlotType {Nyquist, BodePhase, BodeAmp, AdmGodog}
 
-pub struct TemplateApp {
+
+// All data to be rendered
+pub struct ImpedimentApp {
     pub fit_method: FitMethod,
     pub component: ElectricComponent,
     pub interaction: ComponentInteraction,
@@ -157,7 +81,7 @@ pub struct TemplateApp {
     pub editor: String,
 
     pub opening_data: Vec<(String, String)>,
-    pub opening_mode: (FreqOpenParam, ImpOpenParam, usize, usize, usize, usize),
+    pub opening_mode: ImportWindowMode,
 
     pub copied_paramlist: Option<(usize, usize)>,
 
@@ -168,7 +92,9 @@ pub struct TemplateApp {
 
 type AppData = (Vec<Model>, Vec<(Vec<DataPiece>, String)>, Vec< Vec< ParameterDesc >>);
 
-impl TemplateApp {
+
+// Read the impediment project from and write to file
+impl ImpedimentApp {
     fn save_to_string(models: &[Model], datasets: &[(Vec<DataPiece>, String)], params: &[Vec< ParameterDesc >]) -> Result<String, std::fmt::Error> {
         use std::fmt::Write;
 
@@ -347,7 +273,7 @@ fn block_by_coords(circuit: &Circuit, widsize: Vec2, clickpos: Vec2, blocksize: 
     Some((x as u16, y as u16))
 }
 
-impl Default for TemplateApp {
+impl Default for ImpedimentApp {
     fn default() -> Self {
         let circ = Circuit::Series(vec![
             Circuit::Parallel(vec![
@@ -388,7 +314,14 @@ impl Default for TemplateApp {
             current_dataset: 0,
             editor: String::with_capacity(64),
             opening_data: vec![],
-            opening_mode: (FreqOpenParam::Hz, ImpOpenParam::PlusOhm, 0, 1, 2, 0),
+            opening_mode: ImportWindowMode{
+                freq_type: FreqOpenParam::Hz,
+                imp_type: ImpOpenParam::PlusOhm,
+                freq_col: 0,
+                re_z_col: 1,
+                im_z_col: 2,
+                file_shown_index: 0,
+            },
             copied_paramlist: None,
             plot_type: PlotType::Nyquist,
             text_status: String::new(),
@@ -405,10 +338,21 @@ pub fn geomspace(first: f64, last: f64, count: u32) -> impl Iterator<Item=f64>
     (0..count).map(move |i| (f64::from(i).mul_add(delta, lf)).exp())
 }
 
+// All the data used in 'import csv' window
+#[derive(Clone, Copy)]
+pub struct ImportWindowMode {
+    freq_type: FreqOpenParam,
+    imp_type: ImpOpenParam,
+    freq_col: usize,
+    re_z_col: usize,
+    im_z_col: usize,
+    file_shown_index: usize,
+}
 
+// The window for CSV importing
 fn display_import_window(
         ctx: &egui::Context, 
-        opening_mode: &mut (FreqOpenParam, ImpOpenParam, usize, usize, usize, usize),
+        opening_mode: &mut ImportWindowMode,
         opening_data: &mut Vec<(String, String)>,
         datasets: &mut Vec<(Vec<DataPiece>, String)>,
         str_params: &mut [Vec< StringParameterDesc >],
@@ -420,33 +364,33 @@ fn display_import_window(
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Freq");
-                    if ui.small_button("<").clicked() && opening_mode.2 > 0 {opening_mode.2 -= 1}
-                    ui.label(&opening_mode.2.to_string());
-                    if ui.small_button(">").clicked() {opening_mode.2 += 1}
+                    if ui.small_button("<").clicked() && opening_mode.freq_col > 0 {opening_mode.freq_col -= 1}
+                    ui.label(&opening_mode.freq_col.to_string());
+                    if ui.small_button(">").clicked() {opening_mode.freq_col += 1}
                 });
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Hz, &format!("{}", FreqOpenParam::Hz));
-                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Khz, &format!("{}", FreqOpenParam::Khz));
-                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Rads, &format!("{}", FreqOpenParam::Rads));
-                    ui.selectable_value(&mut opening_mode.0, FreqOpenParam::Krads, &format!("{}", FreqOpenParam::Krads));
+                    ui.selectable_value(&mut opening_mode.freq_type, FreqOpenParam::Hz, &format!("{}", FreqOpenParam::Hz));
+                    ui.selectable_value(&mut opening_mode.freq_type, FreqOpenParam::Khz, &format!("{}", FreqOpenParam::Khz));
+                    ui.selectable_value(&mut opening_mode.freq_type, FreqOpenParam::Rads, &format!("{}", FreqOpenParam::Rads));
+                    ui.selectable_value(&mut opening_mode.freq_type, FreqOpenParam::Krads, &format!("{}", FreqOpenParam::Krads));
                 });
                 ui.horizontal(|ui| {
                     ui.label("Re Z");
-                    if ui.small_button("<").clicked() && opening_mode.3 > 0 {opening_mode.3 -= 1}
-                    ui.label(&opening_mode.3.to_string());
-                    if ui.small_button(">").clicked() {opening_mode.3 += 1}
+                    if ui.small_button("<").clicked() && opening_mode.re_z_col > 0 {opening_mode.re_z_col -= 1}
+                    ui.label(&opening_mode.re_z_col.to_string());
+                    if ui.small_button(">").clicked() {opening_mode.re_z_col += 1}
                 });
                 ui.horizontal(|ui| {
                     ui.label("Im Z");
-                    if ui.small_button("<").clicked() && opening_mode.4 > 0 {opening_mode.4 -= 1}
-                    ui.label(&opening_mode.4.to_string());
-                    if ui.small_button(">").clicked() {opening_mode.4 += 1}
+                    if ui.small_button("<").clicked() && opening_mode.im_z_col > 0 {opening_mode.im_z_col -= 1}
+                    ui.label(&opening_mode.im_z_col.to_string());
+                    if ui.small_button(">").clicked() {opening_mode.im_z_col += 1}
                 });
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::PlusOhm, &format!("{}", ImpOpenParam::PlusOhm));
-                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::MinusOhm, &format!("{}", ImpOpenParam::MinusOhm));
-                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::PlusKohm, &format!("{}", ImpOpenParam::PlusKohm));
-                    ui.selectable_value(&mut opening_mode.1, ImpOpenParam::MinusKohm, &format!("{}", ImpOpenParam::MinusKohm));
+                    ui.selectable_value(&mut opening_mode.imp_type, ImpOpenParam::PlusOhm, &format!("{}", ImpOpenParam::PlusOhm));
+                    ui.selectable_value(&mut opening_mode.imp_type, ImpOpenParam::MinusOhm, &format!("{}", ImpOpenParam::MinusOhm));
+                    ui.selectable_value(&mut opening_mode.imp_type, ImpOpenParam::PlusKohm, &format!("{}", ImpOpenParam::PlusKohm));
+                    ui.selectable_value(&mut opening_mode.imp_type, ImpOpenParam::MinusKohm, &format!("{}", ImpOpenParam::MinusKohm));
                 });
             });
             ui.vertical(|ui| {
@@ -465,28 +409,28 @@ fn display_import_window(
                             }
                             datasets.append(&mut newds);
                             *opening_data = vec![];
-                            opening_mode.5 = 0;  // FIXME: revamp the logics
+                            opening_mode.file_shown_index = 0;  // FIXME: revamp the logics
                             return None;
                         }
                         if ui.button("Cancel").clicked() {
                             *opening_data = vec![];
-                            opening_mode.5 = 0;  // FIXME: revamp the logics
+                            opening_mode.file_shown_index = 0;  // FIXME: revamp the logics
                             return None;
                         };
                         Some(new_dset)
                     }).inner;
                     if let Some(new_dset) = new_dset {
                         ui.horizontal(|ui| {
-                            if ui.small_button("<").clicked() && opening_mode.5 > 0 {
-                                opening_mode.5 -= 1;
+                            if ui.small_button("<").clicked() && opening_mode.file_shown_index > 0 {
+                                opening_mode.file_shown_index -= 1;
                             }
-                            ui.label(&new_dset[opening_mode.5].1);
-                            if ui.small_button(">").clicked() && opening_mode.5+1 < opening_data.len() {
-                                opening_mode.5 += 1;
+                            ui.label(&new_dset[opening_mode.file_shown_index].1);
+                            if ui.small_button(">").clicked() && opening_mode.file_shown_index+1 < opening_data.len() {
+                                opening_mode.file_shown_index += 1;
                             }
                         });
                         
-                        let dstring = dataset_to_string(&new_dset[opening_mode.5].0);
+                        let dstring = dataset_to_string(&new_dset[opening_mode.file_shown_index].0);
 
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(&dstring);
@@ -501,7 +445,12 @@ fn display_import_window(
     );
 }
 
-impl TemplateApp {
+fn hinted_button_clicked(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, hint: impl Into<egui::WidgetText>) -> bool {
+    ui.button(text).on_hover_ui(|ui| {ui.label(hint);}).clicked()
+}
+
+// A window render routine
+impl ImpedimentApp {
     fn model_list_control(&mut self, ui: &mut egui::Ui) {
         let Self {
             models,
@@ -510,8 +459,7 @@ impl TemplateApp {
             str_params,
         ..} = self;
         ui.horizontal(|ui| {
-            let btnplus = ui.button("+").on_hover_ui(|ui| {ui.label("Add a new circuit");});
-            if btnplus.clicked() {
+            if hinted_button_clicked(ui, "+", "Add a new circuit") {
                 let newmodel = Model {
                     circuit: Circuit::Element(Element::Resistor),
                     name: "new model".to_string(),
@@ -527,14 +475,12 @@ impl TemplateApp {
                 models.push(newmodel);
             };
 
-            let dupbutton = ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate circuit");});
-            if dupbutton.clicked() {
+            if hinted_button_clicked(ui, "D", "Duplicate circuit") {
                 str_params.push(str_params[*current_circ].clone());
                 models.push(models[*current_circ].clone());
             };
 
-            let delbutton = ui.button("-").on_hover_ui(|ui| {ui.label("Remove current circuit");});
-            if delbutton.clicked() && models.len() > 1 {
+            if hinted_button_clicked(ui, "-", "Remove current circuit") {
                 models.remove(*current_circ);
                 str_params.remove(*current_circ);
                 if *current_circ != 0 {*current_circ -= 1;}
@@ -675,8 +621,7 @@ impl TemplateApp {
         egui::SidePanel::right("rdata").show(ctx, |ui| {
             ui.vertical_centered( |ui| {
                 ui.horizontal(|ui| {
-                    let load_dataset_btn = ui.button("Import").on_hover_ui(|ui| {ui.label("Load a dataset");});
-                    if load_dataset_btn.clicked() {
+                    if hinted_button_clicked(ui, "Import", "Load a dataset") {
                         if let Ok(files) = native_dialog::FileDialog::new()
                         .show_open_multiple_file() {
                             let vcd = files.into_iter().map(|ref f| {
@@ -700,20 +645,20 @@ impl TemplateApp {
                         }
                     }
 
-                    if ui.button("+").on_hover_ui(|ui| {ui.label("Add a new dataset");}).clicked() {
+                    if hinted_button_clicked(ui, "+", "Add a new dataset") {
                         datasets.push((vec![], "new dataset".into()));
                         for (p, m) in str_params.iter_mut().zip(models.iter_mut()) {
                             p.push(m.circuit.generate_new_params().into());
                         }
                     }
-                    if ui.button("D").on_hover_ui(|ui| {ui.label("Duplicate dataset");}).clicked() {
+                    if hinted_button_clicked(ui, "D", "Duplicate dataset")  {
                         datasets.push(datasets[*current_dataset].clone());
                         for p in str_params.iter_mut() {
                             let dc = p[*current_dataset].clone();
                             p.push(dc);
                         }
                     };
-                    if ui.button("-").on_hover_ui(|ui| {ui.label("Remove current dataset");}).clicked() && datasets.len() > 1 {
+                    if hinted_button_clicked(ui, "-", "Remove current dataset") && datasets.len() > 1 {
                         datasets.remove(*current_dataset);
                         for p in str_params.iter_mut() {
                             p.remove(*current_dataset);
@@ -765,7 +710,7 @@ impl TemplateApp {
         ..} = self;
 
         if ui.button("Save project as").clicked() {
-            try_into_numbers(str_params).map_or_else(|| {
+            try_paramdesc_into_numbers(str_params).map_or_else(|| {
                 *text_status = "Can't save due to errors in parameters".into();
             }, |nparams| if let Ok(Some(filename)) = native_dialog::FileDialog::new().show_save_single_file() {
                     if let Ok(mut file) = std::fs::File::create(filename) {
@@ -1049,11 +994,12 @@ impl TemplateApp {
 
             let copypaste_box = ui.horizontal_wrapped(|ui| {
                 let mut lock_now = false;
-
-                if ui.button("Copy").on_hover_ui(|ui| {ui.label("Copy the parameters from the current circuit");}).clicked() {
+                
+                if hinted_button_clicked(ui, "Copy", "Copy the parameters from the current circuit") {
                     *copied_paramlist = Some((*current_circ, *current_dataset));
                 }
-                if ui.button("Paste").on_hover_ui(|ui| {ui.label("Replace the parameters with copied ones");}).clicked() {
+                
+                if hinted_button_clicked(ui, "Paste", "Replace the parameters with copied ones") {
                     if let Some(cp) = copied_paramlist {
                         if cp.0 == *current_circ {
                             if let Some(dpl) = str_params.get(cp.0).and_then(|x| x.get(cp.1)) {
@@ -1242,7 +1188,7 @@ impl TemplateApp {
     }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for ImpedimentApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.set_visuals(egui::Visuals::dark());
 
@@ -1279,7 +1225,7 @@ impl eframe::App for TemplateApp {
 }
 
 fn main() {
-    let app = TemplateApp::default();
+    let app = ImpedimentApp::default();
     let native_options = eframe::NativeOptions{
         initial_window_size: Some(vec2(1100., 600.)),
         ..eframe::NativeOptions::default()
